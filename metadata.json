@@ -1,0 +1,6 @@
+{
+  "name": "Smart Alarm",
+  "description": "Smart Android Alarm application with adaptive recurring alarms, 'Ask Before Next Alarm', geofencing zone awareness, and Room database architecture.",
+  "requestFramePermissions": ["geolocation"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
