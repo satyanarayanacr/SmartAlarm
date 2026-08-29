@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+        Platform window theme used only before Compose takes over (window background,
+        status bar, splash-to-content handoff). All actual UI styling happens in
+        ui/theme/Theme.kt via Material3, not here. Kept dependency-free (no material-components
+        library) since this app is pure Compose.
+    -->
+    <style name="Theme.SmartAlarm" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:windowBackground">@color/ic_launcher_background</item>
+    </style>
+</resources>

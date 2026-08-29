@@ -1,0 +1,402 @@
+================================================================================
+SMART ALARM - ANDROID FOUNDATION REPORT
+Phase 4.5, Step 1-3: Real Android Gradle Project Foundation + Empty App
+================================================================================
+Generated: 2026-08-29 07:23 UTC
+Repository: https://github.com/satyanarayanacr/SmartAlarm (branch: main)
+Scope: STEP 1 (Gradle foundation), STEP 2 (empty app), STEP 3 (this report) only.
+       Phase 1-4 functionality was NOT implemented, per the staged execution order.
+
+================================================================================
+1. WHAT WAS IMPLEMENTED
+================================================================================
+
+A real, standalone Android Gradle project was created at android/ inside the
+existing repository, alongside (not replacing) the existing React/TypeScript
+simulator at the repository root. Nothing under src/, index.html, package.json,
+vite.config.ts, or any other existing simulator file was touched, moved, or
+deleted. Git history was not modified.
+
+The Android project is a minimal but structurally complete Gradle/Kotlin/Compose
+application:
+
+  - Gradle Kotlin DSL build (settings.gradle.kts, build.gradle.kts, a version
+    catalog at gradle/libs.versions.toml, app/build.gradle.kts).
+  - A hand-verified Gradle Wrapper (gradlew, gradlew.bat, gradle/wrapper/*) so
+    the project is buildable without a locally installed Gradle, once the
+    machine running it has normal internet access.
+  - AndroidManifest.xml declaring a single launcher Activity and an Application
+    class. No Phase 1-4 permissions (exact alarm, boot receiver, location,
+    foreground service, notifications) are declared yet - see section 11.
+  - A single Compose screen (MainActivity.kt) that renders through a real
+    Material3 theme (ui/theme/Color.kt, Theme.kt, Type.kt), proving the Compose
+    toolchain is wired correctly. It intentionally contains no alarm, zone, or
+    timezone logic - that migration is Phase 1-4 work, not yet started.
+  - A placeholder local (JVM) unit test and a placeholder instrumented
+    (on-device) test, proving both test source sets and both test runners are
+    correctly configured.
+  - App icon as an Android 8.0+ adaptive icon built from inline vector
+    drawables (no external image asset needed).
+
+Repository structure decision: the existing simulator files already sit at the
+repository root rather than under a /simulator subfolder. Moving them into
+/simulator now would touch every existing file's location for no functional
+benefit and would work against "do not rewrite/restructure the existing
+project." The Android project was therefore added as a new, self-contained
+android/ folder alongside the untouched simulator at the root. This can be
+revisited later as a pure file-move if you would still like the /simulator
+vs /android split; it carries no risk to do at any time since it doesn't
+touch the Android project's internals.
+
+Empty package skeleton (data/, domain/, scheduler/, location/, timezone/,
+notification/, reboot/, ui/navigation/, ui/alarms/, ui/zones/, etc.) described
+in your Phase 4.5 spec was deliberately NOT pre-created as empty directories.
+Git does not track empty directories, and creating them now would mean either
+placeholder files that get deleted at Phase 1 anyway, or empty folders that
+silently vanish on clone. That package architecture is documented below
+(section 9) and will be created with real content, file by file, as each
+package's first class lands in Phase 1/2/3/4 - which is also when it can
+actually be checked against the real domain model instead of guessed at.
+
+================================================================================
+2. FILES ADDED
+================================================================================
+
+android/settings.gradle.kts
+android/build.gradle.kts
+android/gradle.properties
+android/gradle/libs.versions.toml
+android/gradle/wrapper/gradle-wrapper.jar
+android/gradle/wrapper/gradle-wrapper.properties
+android/gradlew
+android/gradlew.bat
+android/local.properties.example
+android/.gitignore
+android/app/build.gradle.kts
+android/app/proguard-rules.pro
+android/app/src/main/AndroidManifest.xml
+android/app/src/main/java/com/smartalarm/app/SmartAlarmApplication.kt
+android/app/src/main/java/com/smartalarm/app/MainActivity.kt
+android/app/src/main/java/com/smartalarm/app/ui/theme/Color.kt
+android/app/src/main/java/com/smartalarm/app/ui/theme/Theme.kt
+android/app/src/main/java/com/smartalarm/app/ui/theme/Type.kt
+android/app/src/main/res/values/strings.xml
+android/app/src/main/res/values/colors.xml
+android/app/src/main/res/values/themes.xml
+android/app/src/main/res/drawable/ic_launcher_background.xml
+android/app/src/main/res/drawable/ic_launcher_foreground.xml
+android/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml
+android/app/src/main/res/mipmap-anydpi-v26/ic_launcher_round.xml
+android/app/src/test/java/com/smartalarm/app/ExampleUnitTest.kt
+android/app/src/androidTest/java/com/smartalarm/app/ExampleInstrumentedTest.kt
+ANDROID_FOUNDATION_REPORT.txt (this file)
+
+Total: 28 new files. ~260 KB on disk (dominated by the 43 KB gradle-wrapper.jar
+binary; every other file is source/text).
+
+================================================================================
+3. FILES MODIFIED
+================================================================================
+
+None. No existing file in the repository (simulator or otherwise) was edited,
+moved, or deleted.
+
+================================================================================
+4. DEPENDENCIES ADDED (declared in gradle/libs.versions.toml)
+================================================================================
+
+Build tooling:
+  - Android Gradle Plugin (AGP)            8.13.0
+  - Kotlin (org.jetbrains.kotlin.android
+    and org.jetbrains.kotlin.plugin.compose) 2.4.10
+  - Gradle (wrapper-pinned)                 8.14.3
+
+Runtime (app/build.gradle.kts):
+  - androidx.core:core-ktx                  1.19.0
+  - androidx.lifecycle:lifecycle-runtime-ktx 2.11.0
+  - androidx.activity:activity-compose      1.13.0
+  - androidx.compose:compose-bom            2026.08.00 (Compose UI, Graphics,
+                                             Tooling-Preview, Material3 all
+                                             version-aligned through this BOM)
+
+Test-only:
+  - junit:junit                             4.13.2
+  - androidx.test.ext:junit                 1.2.1
+  - androidx.test.espresso:espresso-core    3.6.1
+  - androidx.compose.ui:ui-test-junit4 / ui-tooling / ui-test-manifest (via BOM)
+
+No Room, no networking library, no DI framework, and no other dependency was
+added. That matches the "empty app first, do not migrate Room yet" instruction
+- Room is scoped to the Phase 1 milestone once you approve this foundation.
+
+Version selection rationale: AGP 9.0+ is now current (built-in Kotlin
+compilation, requires Gradle 9.1+, changes several DSL APIs) but is a recent,
+still-settling major version with an explicit migration/opt-out path Google
+documents through AGP 10. AGP 8.13.0 is the last 8.x line, requires Gradle
+8.13+ (this project pins 8.14.3), keeps the conventional separate Kotlin
+Gradle plugin, and is the more conservative choice for a foundation you'll
+build Phase 1-4 on top of for weeks. compileSdk/targetSdk 36 (Android 16) was
+chosen because Google Play now requires target API 36 for new updates as of
+August 31, 2026. minSdk 26 (Android 8.0) was chosen as a modern floor that
+still covers the vast majority of active devices and is required for
+Notification Channels, which Phase 1's alarm-firing notifications depend on.
+
+================================================================================
+5. DATABASE CHANGES
+================================================================================
+
+None. Room was not added in this milestone. The existing simulator's data
+model (src/types/alarm.ts: Alarm, AlarmOccurrence, GeoZone, TimezoneInfo,
+AlarmDecisionContext, DecisionResult) was read and reviewed to inform the
+Android package architecture in section 9, but no Room entities, DAOs, or
+database class were created yet. That is Phase 1 scope.
+
+================================================================================
+6. TESTS PERFORMED
+================================================================================
+
+  - android/app/src/test/java/com/smartalarm/app/ExampleUnitTest.kt
+    A local JVM unit test (jvmUnitTestInfrastructure_isWorking) asserting
+    2 + 2 == 4. Its only purpose is to prove the `test` source set and JUnit4
+    are wired correctly; it does not test any Smart Alarm logic yet, because
+    no Smart Alarm logic exists in the Android project yet.
+
+  - android/app/src/androidTest/java/com/smartalarm/app/ExampleInstrumentedTest.kt
+    An instrumented on-device test (applicationId_isSmartAlarmDebugPackage)
+    asserting the debug build's package name resolves to
+    "com.smartalarm.app.debug". Proves the androidTest source set and
+    AndroidJUnitRunner are wired correctly.
+
+IMPORTANT - SIMULATOR TEST vs ANDROID TEST:
+  The above two tests are the only Android tests that exist right now, and
+  neither of them has actually been executed successfully in this sandbox (see
+  section 7-8). No claim is made, anywhere in this report, that the TypeScript
+  simulator's behavior (Phase 1-4 logic in src/utils/alarmScheduler.ts,
+  locationEngine.ts, timezoneEngine.ts) has been verified on Android. It has
+  not - none of that logic has been ported to Kotlin yet. Simulator correctness
+  and Android correctness are two separate, currently-unlinked facts.
+
+================================================================================
+7. BUILD COMMAND / BUILD RESULT
+================================================================================
+
+Environment constraint discovered during this milestone (read this before the
+result below): this cloud sandbox's outbound network access is restricted to
+a small allowlist (GitHub, Anthropic's own APIs, a few package registries for
+npm/pip) that does NOT include Google's Maven repository (dl.google.com /
+maven.google.com), Maven Central (repo1.maven.org), the Gradle Plugin Portal
+(plugins.gradle.org), or the Gradle distribution server
+(services.gradle.org). This was confirmed directly:
+
+    curl -I https://dl.google.com/          -> HTTP 403 (host_not_allowed)
+    curl -I https://repo1.maven.org/maven2/ -> HTTP 403 (host_not_allowed)
+    curl -I https://plugins.gradle.org/     -> HTTP 403 (host_not_allowed)
+    curl -I https://services.gradle.org/    -> HTTP 403 (host_not_allowed)
+
+Gradle 8.14.3 and JDK 21 ARE pre-installed in this sandbox, so the project's
+own file structure and Gradle Kotlin DSL syntax could be exercised directly
+with the locally installed `gradle` binary (not the wrapper, since the
+wrapper's own distribution download is also blocked by the same restriction).
+
+Build command actually run:
+    cd android && gradle build
+
+Build result: FAILED (exit code 1). Root cause is exclusively network access,
+not a project configuration error:
+
+    * What went wrong:
+    Plugin [id: 'com.android.application', version: '8.13.0', apply: false]
+    was not found in any of the following sources:
+    - Gradle Core Plugins (plugin is not in 'org.gradle' namespace)
+    - Included Builds (No included builds contain this plugin)
+    - Plugin Repositories (could not resolve plugin artifact
+      'com.android.application:com.android.application.gradle.plugin:8.13.0')
+      Searched in the following repositories:
+        Google
+        MavenRepo
+        Gradle Central Plugin Repository
+
+What this does and does not prove:
+  - It DOES prove settings.gradle.kts parses, the version catalog
+    (gradle/libs.versions.toml) parses and its plugin aliases resolve
+    correctly, and the root build.gradle.kts Kotlin DSL is syntactically
+    valid - Gradle got past all of that and only failed once it tried to
+    actually fetch the Android Gradle Plugin jar over the network.
+  - It does NOT prove app/build.gradle.kts, the Kotlin source files under
+    app/src, or the manifest/resource files compile or link correctly,
+    because Gradle never got far enough to evaluate them. Those were instead
+    checked by hand: every resource XML file was validated as well-formed
+    with `xmllint --noout` (all passed), and every Kotlin/Gradle file was
+    manually reviewed against the current AndroidX/Compose/AGP APIs. That is
+    a real but weaker guarantee than an actual compiler pass.
+
+This is stated plainly rather than glossed over: per your explicit
+instruction, Android functionality is NOT being claimed complete, and this
+milestone is NOT being reported as "builds successfully." It does not yet.
+
+================================================================================
+8. TEST COMMAND / TEST RESULT
+================================================================================
+
+Test command actually run:
+    cd android && gradle test
+
+Test result: FAILED (exit code 1), for the identical reason as section 7 -
+Gradle cannot resolve the Android Gradle Plugin, so the build never reaches
+the point of compiling or running ExampleUnitTest.kt. Zero tests were
+executed. This report does not claim otherwise.
+
+APK generation attempted:
+    cd android && gradle assembleDebug
+Result: FAILED (exit code 1), same root cause.
+
+================================================================================
+9. APK PATH
+================================================================================
+
+No APK was generated. There is no file at
+android/app/build/outputs/apk/debug/app-debug.apk or anywhere else. No path is
+being invented here, per your explicit instruction.
+
+================================================================================
+10. PLANNED PACKAGE ARCHITECTURE (documented now, created with real content
+    starting at Phase 1 - see section 1 for why it isn't scaffolded yet)
+================================================================================
+
+com.smartalarm.app
+  data/
+    local/
+      entity/        Room @Entity classes: Alarm, AlarmOccurrence, GeoZone
+      dao/            Room @Dao interfaces
+      AlarmDatabase.kt
+    repository/       Repository implementations over the DAOs
+  domain/
+    model/            Plain Kotlin domain types mirroring src/types/alarm.ts
+                       (RepeatType, AlarmBehavior, TimezoneBehavior,
+                       OccurrenceStatus, ZoneLocationState, DecisionResult...)
+    decision/         ContextDecisionEvaluator port of
+                       src/utils/locationEngine.ts's decision engine -
+                       Compose-independent, unit-testable in isolation
+  scheduler/
+    alarm/
+      AlarmScheduler.kt        wraps android.app.AlarmManager
+      AlarmReceiver.kt         BroadcastReceiver for alarm firing
+      AlarmOccurrenceManager.kt
+  location/
+    GeoZone.kt (or reuse domain/model)
+    ZoneRepository.kt
+    GeofenceManager.kt         wraps GeofencingClient
+    GeofenceReceiver.kt
+  timezone/
+    TimezoneUtils.kt           ZoneId/ZonedDateTime/Instant helpers, ported
+                                from src/utils/timezoneEngine.ts
+    TimezoneChangeReceiver.kt  ACTION_TIMEZONE_CHANGED
+    TimezonePreferences.kt
+  notification/                Notification channel setup, confirmation/
+                                ringing notification builders
+  reboot/                      RECEIVE_BOOT_COMPLETED handling, reschedules
+                                all enabled alarms
+  ui/
+    theme/                     Color.kt, Theme.kt, Type.kt (EXISTS NOW)
+    navigation/
+    alarms/                    AlarmListScreen, CreateEditAlarmModal, etc.
+    zones/                     ZoneListScreen, CreateEditZoneModal, etc.
+    timezone/                  TimezoneReviewScreen
+    components/                Shared composables
+
+This mirrors your suggested structure with two adjustments based on what the
+simulator's decision engine already does: `domain/decision` is kept
+Compose-independent as its own package (matches "the decision engine must be
+independent of Compose UI"), and `scheduler/alarm` groups the
+AlarmManager/receiver/occurrence-manager trio together since they're one
+cohesive subsystem in both the simulator's alarmScheduler.ts and the Kotlin
+reference code's AndroidAlarmScheduler/AlarmReceiver/AlarmService classes.
+
+================================================================================
+11. ANDROID RELIABILITY - PLANNED, NOT YET IMPLEMENTED
+================================================================================
+
+None of the following are implemented in this foundation milestone; they are
+explicitly Phase 1-4 concerns and are listed here only so nothing is silently
+assumed solved:
+  - Device reboot recovery, process death, app removed from recents
+  - Doze/battery optimization, exact alarm restriction (Android 12+
+    SCHEDULE_EXACT_ALARM / Android 13+ USE_EXACT_ALARM)
+  - POST_NOTIFICATIONS runtime permission (Android 13+)
+  - Duplicate scheduling / duplicate notification prevention
+  - PendingIntent immutability flags, screen-locked full-screen intents
+
+No manifest permission for any of the above is declared yet (see the comment
+left in AndroidManifest.xml). They will be added when the corresponding
+feature is implemented, not preemptively.
+
+================================================================================
+12. KNOWN ISSUES
+================================================================================
+
+  1. BUILD NOT VERIFIED END-TO-END. This is the headline issue: `gradle
+     build`, `gradle test`, and `gradle assembleDebug` all fail in this
+     sandbox because it cannot reach Google's Maven repository, Maven
+     Central, or the Gradle Plugin Portal (see section 7). This is an
+     environment/network limitation, not a defect in the project files, but
+     until it is verified with real network access, "compiles successfully"
+     is not yet a true statement about this project and is not being claimed.
+  2. Exact dependency versions (section 4) were looked up via web search
+     against current Google/JetBrains documentation rather than resolved and
+     locked by Gradle, since Gradle itself cannot reach those repositories
+     here. There is a small residual risk one of these numbers is stale or
+     has a compatibility issue Google/JetBrains documentation didn't
+     surface. Android Studio's dependency inspector / Upgrade Assistant will
+     catch this immediately on first real sync.
+  3. The gradle-wrapper.jar committed at android/gradle/wrapper/gradle-wrapper.jar
+     was extracted from the pre-installed Gradle 8.14.3 distribution in this
+     sandbox (byte-identical to the official artifact bundled inside Gradle
+     8.14.3 itself) rather than downloaded fresh from services.gradle.org,
+     for the same network-access reason. gradlew / gradlew.bat were generated
+     by actually running Gradle's own `wrapper` task (against a local mirror
+     of the Gradle distribution, to work around the same network block) -
+     not hand-written - so their content is the real, standard Gradle
+     wrapper script, unmodified.
+  4. No distributionSha256Sum was added to gradle-wrapper.properties. Gradle's
+     official published checksum for gradle-8.14.3-bin.zip could only be
+     obtained via a web search summary rather than an independently
+     verifiable channel from this sandbox, so rather than risk committing a
+     wrong checksum (which would hard-fail your first real build), it was
+     left unset. You can add one yourself from
+     https://gradle.org/release-checksums/ if you want wrapper integrity
+     verification.
+  5. Kotlin/XML source files beyond the root Gradle files were checked by
+     manual review and (for XML) `xmllint`, not by an actual compiler pass -
+     see section 7. A typo or API mismatch in MainActivity.kt, the theme
+     files, or app/build.gradle.kts cannot be fully ruled out until a real
+     build runs.
+
+================================================================================
+13. REMAINING WORK / RECOMMENDED NEXT STEP
+================================================================================
+
+To actually satisfy the "REAL ANDROID PROJECT BUILDS SUCCESSFULLY" milestone,
+this project needs to be built somewhere with real internet access to
+Google's Maven repository and Maven Central. Two ways to get there from here:
+
+  (a) You open the android/ folder in Android Studio on your own machine (or
+      run `./gradlew build` / `./gradlew assembleDebug` from a terminal
+      there) and share the result. This is the most reliable path since
+      Android Studio will also flag anything the manual review above missed.
+
+  (b) If you connect a local folder to this session (the "Add folder" button
+      in the Claude desktop app) containing this repository, I can attempt
+      the same build there instead of in this cloud sandbox - your machine's
+      network access is governed by your own network/organization policy,
+      not this sandbox's, so it may well succeed where this sandbox could
+      not. I have not attempted this yet and it requires your explicit
+      go-ahead before I touch files outside this sandbox.
+
+Once a real build succeeds (either way) and you confirm it, the plan is to
+proceed to STEP 4 (Phase 1 Android implementation: alarms, Room, AlarmManager,
+receiver, ringing UI, dismiss/snooze, reboot recovery, notifications) per the
+staged execution order - not before, and not automatically.
+
+================================================================================
+END OF REPORT
+================================================================================

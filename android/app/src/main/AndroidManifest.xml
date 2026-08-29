@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!--
+        Foundation milestone: no runtime permissions are declared yet.
+
+        Phase 1 will add: SCHEDULE_EXACT_ALARM / USE_EXACT_ALARM, RECEIVE_BOOT_COMPLETED,
+        POST_NOTIFICATIONS, WAKE_LOCK, USE_FULL_SCREEN_INTENT, VIBRATE.
+        Phase 3 will add: ACCESS_FINE_LOCATION, ACCESS_COARSE_LOCATION,
+        ACCESS_BACKGROUND_LOCATION.
+        These are intentionally omitted here so the empty-app milestone reflects only what
+        it actually uses.
+    -->
+
+    <application
+        android:name=".SmartAlarmApplication"
+        android:allowBackup="true"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.SmartAlarm">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:theme="@style/Theme.SmartAlarm">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+    </application>
+
+</manifest>
