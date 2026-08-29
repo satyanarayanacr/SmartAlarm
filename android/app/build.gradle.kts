@@ -8,7 +8,10 @@ plugins {
 
 android {
     namespace = "com.smartalarm.app"
-    compileSdk = 36
+    // compileSdk 37 is required by the resolved Compose 1.12.0 libraries (AAR metadata check).
+    // targetSdk is intentionally kept at 36 below - compileSdk may be higher than targetSdk;
+    // it only controls which APIs are available at compile time, not runtime behavior opt-in.
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "com.smartalarm.app"
