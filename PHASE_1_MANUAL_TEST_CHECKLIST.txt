@@ -1,0 +1,54 @@
+SMART ALARM - PHASE 1 - MANUAL TEST CHECKLIST
+To be run by you, on a real device, and checked off by you.
+I have not run these and am not claiming any of them pass - only what's
+in PHASE_1_ANDROID_REPORT.txt (build/test/lint/one confirmed alarm ring)
+is verified so far.
+
+[ ] 1.  Create a ONE_TIME alarm a few minutes in the future. Confirm it
+        appears in the alarm list with the correct time.
+[ ] 2.  Confirm that alarm rings at the exact scheduled time, with the
+        full-screen ringing UI showing over the lock screen.
+[ ] 3.  Confirm the ONE_TIME alarm auto-disables itself after it fires
+        (toggle shows off, no new occurrence is scheduled).
+[ ] 4.  Create a WEEKLY alarm for one or more days of the week. Confirm
+        it schedules for the correct next matching day/time.
+[ ] 5.  Let a WEEKLY alarm fire once. Confirm it stays enabled and a new
+        occurrence is scheduled for the following matching day.
+[ ] 6.  While an alarm is ringing, tap Snooze. Confirm the ringing UI
+        dismisses and the alarm rings again after the snooze interval.
+[ ] 7.  While an alarm is ringing, tap Dismiss. Confirm the ringing UI
+        and notification both clear and the alarm does not ring again
+        until its next real occurrence.
+[ ] 8.  Edit an existing alarm's time/days/name. Confirm the change is
+        saved and the next ring reflects the new schedule (old scheduled
+        occurrence does not also fire).
+[ ] 9.  Delete an alarm. Confirm it disappears from the list and does
+        not ring at its old scheduled time.
+[ ] 10. Toggle an alarm off, then back on. Confirm it does not ring
+        while off, and resumes correctly once re-enabled.
+[ ] 11. Create two alarms scheduled close together (a minute or two
+        apart). Confirm both ring independently and neither is dropped
+        or overwrites the other's notification.
+[ ] 12. Reboot the device with at least one alarm still scheduled in the
+        future. Confirm it still rings correctly after reboot (tests
+        BootReceiver/RescheduleAllUseCase).
+[ ] 13. Reboot the device after intentionally missing an alarm's time
+        while it was off (device off through the scheduled time).
+        Confirm: a ONE_TIME alarm shows as missed/auto-disabled and does
+        NOT fire retroactively; a WEEKLY alarm shows as missed for that
+        occurrence but is still enabled with its next occurrence
+        correctly scheduled.
+[ ] 14. On Android 13+, revoke notification permission for the app from
+        system Settings, then let an alarm's scheduled time pass. Confirm
+        (and note) the known Phase 1 limitation: no ringing UI/sound
+        appears for that occurrence (see report section 3, item 2) -
+        this is expected, not a bug to report.
+[ ] 15. Resize/rotate to a wide-screen or tablet-like layout (or use a
+        large-screen emulator/foldable if available). Confirm the
+        two-pane list+edit layout renders without overlapping elements,
+        especially around the areas that were reworked to avoid
+        Modifier.weight() (see report section 3, item 1).
+[ ] 16. Force-close the app entirely (swipe away from recents) with an
+        alarm still scheduled. Confirm the alarm still rings at its
+        scheduled time (AlarmManager-based alarms must survive the app
+        process being killed, not just backgrounded).

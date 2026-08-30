@@ -1,20 +1,24 @@
 package com.smartalarm.app
 
 import android.app.Application
+import com.smartalarm.app.notification.NotificationHelper
 
 /**
  * Application entry point for Smart Alarm.
  *
- * This is intentionally minimal for the Phase 4.5 foundation milestone. Future phases will
- * initialize process-wide singletons here (the Room database via a repository holder,
- * notification channel registration, WorkManager/AlarmManager reconciliation on cold start,
- * etc.) rather than in individual Activities, so that alarm state is consistent whether the
- * app was launched by the user or woken up by a BroadcastReceiver/Service.
+ * Phase 1: builds the process-wide [ServiceLocator] (Room database, repository, AlarmScheduler,
+ * use cases) and registers the alarm notification channel here, so alarm state is initialized
+ * consistently whether the app was launched by the user, woken up by [com.smartalarm.app.receiver.AlarmReceiver],
+ * or woken up by [com.smartalarm.app.receiver.BootReceiver] after a reboot.
  */
 class SmartAlarmApplication : Application() {
 
+    lateinit var serviceLocator: ServiceLocator
+        private set
+
     override fun onCreate() {
         super.onCreate()
-        // No-op for the foundation milestone.
+        serviceLocator = ServiceLocator.from(this)
+        NotificationHelper.ensureChannel(this)
     }
 }

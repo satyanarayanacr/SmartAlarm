@@ -1,22 +1,82 @@
 [versions]
 # Android build tooling
-agp = "8.13.0"
+# AGP 9.3.2 requires Gradle 9.5.0+ (see gradle/wrapper/gradle-wrapper.properties) and JDK 17
+# (already in use). It also ships built-in Kotlin support that conflicts with the separate
+# org.jetbrains.kotlin.android plugin this project still uses - see the android.builtInKotlin=false
+# opt-out and comment in gradle.properties.
+agp = "9.3.2"
+# Kotlin: DIAGNOSTIC EXPERIMENT, currently 2.4.20-RC2 (a release candidate, not a stable
+# release) - see below for why, and treat this as temporary until confirmed or replaced.
+#
+# HISTORY: Room's annotation processing needs either KSP or kapt. Attempt 1 pinned
+# kotlin = "2.3.11", which turned out to be KSP's own release number (KSP dropped its old
+# "<kotlin>-<ksp>" compound version scheme and now versions itself independently) - not a real
+# Kotlin release; Gradle correctly rejected it. Attempt 2 pinned kotlin = "2.3.20" (KSP 2.3.11's
+# real kotlinBaseVersion) - Gradle accepted that Kotlin version, but the build then failed with
+# "Cannot access 'val RowColumnParentData?.weight: Float': it is internal in file" while
+# compiling our own Compose code against the Compose BOM (2026.08.00 / Compose UI 1.12.0,
+# released August 12 2026). Rather than downgrade the Compose BOM to chase a moving target, Room
+# was switched from KSP to kapt (see app/build.gradle.kts) - kapt ships as part of the Kotlin
+# Gradle plugin itself and is always version-locked, avoiding the KSP version-guessing problem.
+# Attempt 3 moved Kotlin forward to 2.4.10 (the version already proven to build the Phase 4.5
+# empty foundation), expecting a newer Kotlin to read the Compose BOM's metadata correctly - but
+# a real `gradlew clean build --no-build-cache --rerun-tasks` (full cache bypass, 63/63 tasks
+# freshly executed, ruling out stale-cache poisoning from the earlier version flips) reproduced
+# the IDENTICAL "internal in file" error on the SAME line, in both compileDebugKotlin and
+# compileReleaseKotlin. That rules out both "wrong KSP version" and "stale cache" as the cause.
+#
+# DIAGNOSTIC RESULT: the 2.4.20-RC2 experiment above was tried and FAILED - identical
+# "RowColumnParentData?.weight ... internal in file" error, same line, even on a release
+# candidate from a newer Kotlin generation. Reverted to 2.4.10 (still the best-proven version -
+# it's what built the Phase 4.5 empty foundation successfully). In hindsight this was a weak
+# test: Kotlin metadata versions bump on MINOR releases (2.3 -> 2.4), and 2.4.20 is the same
+# minor line as 2.4.10, so it likely reads/writes the identical metadata format - it was never
+# going to differ from 2.4.10 for this specific problem. No Kotlin 2.5.x exists yet to test that
+# would actually change the metadata generation. Investigating other causes next (a real Kotlin
+# compiler bug specific to this Compose Foundation declaration pattern, or the Compose BOM
+# version itself) rather than continuing to guess at Kotlin version numbers.
 kotlin = "2.4.10"
 
 # AndroidX / Compose
 coreKtx = "1.19.0"
 lifecycleRuntimeKtx = "2.11.0"
+lifecycleViewmodelCompose = "2.11.0"
 activityCompose = "1.13.0"
 composeBom = "2026.08.00"
+navigationCompose = "2.9.8"
+
+# Room (persistence)
+room = "2.8.4"
+# Room 2.8.4 (still the latest stable Room release) bundles an older kotlin-metadata-jvm that
+# only reads Kotlin metadata up to version 2.3.0. Our Kotlin 2.4.10 compiler stamps compiled
+# classes with metadata version 2.4.0, which Room's bundled reader rejects during kapt annotation
+# processing with:
+#   java.lang.IllegalArgumentException: Provided Metadata instance has version 2.4.0, while
+#   maximum supported version is 2.3.0. To support newer versions, update the kotlin-metadata-jvm
+#   library.
+# This is a known, currently-unresolved gap across the Kotlin annotation-processing ecosystem
+# (Dagger/Hilt hit the identical error pattern on each recent Kotlin bump - see their issue
+# tracker's repeated "Upgrade kotlin-metadata-jvm to support Kotlin 2.2.0/2.3.0" fixes) with the
+# same fix each time: force a newer kotlin-metadata-jvm onto the classpath rather than waiting for
+# Room to catch up or downgrading Kotlin (which would reopen the earlier Compose BOM/Kotlin ABI
+# mismatch this project already worked around by moving to Kotlin 2.4.10). Confirmed on Maven
+# Central that org.jetbrains.kotlin:kotlin-metadata-jvm:2.4.10 exists as a stable release matching
+# our pinned Kotlin version exactly - forced onto all configurations in app/build.gradle.kts.
+
+# Coroutines
+kotlinxCoroutines = "1.10.2"
 
 # Testing
 junit = "4.13.2"
 androidxJunit = "1.2.1"
 espressoCore = "3.6.1"
+coroutinesTest = "1.10.2"
+archCoreTesting = "2.2.0"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
 androidx-lifecycle-runtime-ktx = { group = "androidx.lifecycle", name = "lifecycle-runtime-ktx", version.ref = "lifecycleRuntimeKtx" }
+androidx-lifecycle-viewmodel-compose = { group = "androidx.lifecycle", name = "lifecycle-viewmodel-compose", version.ref = "lifecycleViewmodelCompose" }
 androidx-activity-compose = { group = "androidx.activity", name = "activity-compose", version.ref = "activityCompose" }
 
 androidx-compose-bom = { group = "androidx.compose", name = "compose-bom", version.ref = "composeBom" }
@@ -27,12 +87,27 @@ androidx-ui-tooling-preview = { group = "androidx.compose.ui", name = "ui-toolin
 androidx-ui-test-manifest = { group = "androidx.compose.ui", name = "ui-test-manifest" }
 androidx-ui-test-junit4 = { group = "androidx.compose.ui", name = "ui-test-junit4" }
 androidx-material3 = { group = "androidx.compose.material3", name = "material3" }
+androidx-navigation-compose = { group = "androidx.navigation", name = "navigation-compose", version.ref = "navigationCompose" }
+
+androidx-room-runtime = { group = "androidx.room", name = "room-runtime", version.ref = "room" }
+androidx-room-ktx = { group = "androidx.room", name = "room-ktx", version.ref = "room" }
+androidx-room-compiler = { group = "androidx.room", name = "room-compiler", version.ref = "room" }
+androidx-room-testing = { group = "androidx.room", name = "room-testing", version.ref = "room" }
+
+# Forced onto the classpath to work around Room 2.8.4's outdated bundled kotlin-metadata-jvm -
+# see the long comment on `room` above.
+kotlin-metadata-jvm = { group = "org.jetbrains.kotlin", name = "kotlin-metadata-jvm", version.ref = "kotlin" }
+
+kotlinx-coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "kotlinxCoroutines" }
+kotlinx-coroutines-test = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-test", version.ref = "coroutinesTest" }
 
 junit = { group = "junit", name = "junit", version.ref = "junit" }
 androidx-junit = { group = "androidx.test.ext", name = "junit", version.ref = "androidxJunit" }
 androidx-espresso-core = { group = "androidx.test.espresso", name = "espresso-core", version.ref = "espressoCore" }
+androidx-arch-core-testing = { group = "androidx.arch.core", name = "core-testing", version.ref = "archCoreTesting" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
 kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
 kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
+kotlin-kapt = { id = "org.jetbrains.kotlin.kapt", version.ref = "kotlin" }

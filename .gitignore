@@ -6,3 +6,7 @@ coverage/
 *.log
 .env*
 !.env.example
+
+# IDE project files (machine-specific, not shared)
+.idea/
+*.iml

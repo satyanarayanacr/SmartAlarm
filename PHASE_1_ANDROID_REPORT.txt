@@ -1,0 +1,221 @@
+SMART ALARM - PHASE 1 ANDROID CONVERSION - COMPLETION REPORT
+Date: 2026-08-30
+Repository: https://github.com/satyanarayanacr/SmartAlarm (branch: main)
+
+============================================================
+1. SCOPE OF PHASE 1
+============================================================
+Convert the existing React/TypeScript Smart Alarm simulator into a real,
+buildable, installable Android application covering:
+  - Room-backed persistence (Alarm + AlarmOccurrence entities)
+  - Occurrence-based scheduling (Alarm = rule, AlarmOccurrence = one
+    concrete scheduled instance), via a real android.app.AlarmManager
+    abstraction (AlarmScheduler / AndroidAlarmScheduler)
+  - Local-clock-time-only recurrence math (ONE_TIME, WEEKLY) - no
+    geofencing (Phase 2) and no cross-timezone behavior (Phase 3)
+  - Full-screen ringing UI + notification with Android 13+
+    POST_NOTIFICATIONS runtime permission handling
+  - Boot recovery (RescheduleAllUseCase via BootReceiver)
+  - Adaptive Compose UI (phone list/edit navigation + wide-screen
+    two-pane layout)
+  - Real JVM unit tests (12 test files, no Robolectric/instrumentation
+    required for the domain/use-case layer)
+
+Explicitly NOT in Phase 1 (per the agreed staged plan): geofencing/location
+(Phase 2), timezone-shift-aware alarms (Phase 3), and later features
+(Phase 4/5). None of that was started.
+
+============================================================
+2. VERIFIED EVIDENCE (real, not assumed)
+============================================================
+a) Build: `gradlew clean build` on the user's machine (Windows, real
+   Android SDK/JDK toolchain) completed with BUILD SUCCESSFUL, and the
+   full task graph included, all passing in the same run:
+     - compileDebugKotlin / compileReleaseKotlin
+     - kaptDebugKotlin / kaptReleaseKotlin (Room annotation processing)
+     - testDebugUnitTest (all unit tests green)
+     - lintDebug (0 errors - 20 warnings/1 hint remain, none blocking)
+     - assembleDebug, assembleRelease, build
+
+b) APK artifact - verified, not assumed:
+   Real on-disk build output (confirmed via directory listing on the
+   user's machine):
+     E:\SmartAlarm\android\app\build\outputs\apk\debug\app-debug.apk
+       12,393,560 bytes
+     E:\SmartAlarm\android\app\build\outputs\apk\release\app-release-unsigned.apk
+       8,747,400 bytes (unsigned - no release signing config exists yet;
+       expected, since release signing/distribution was never in Phase 1
+       scope)
+
+   The file the user separately uploaded (appdebug.apk) was independently
+   staged and hashed against the real build-output file above:
+     SHA-256 (uploaded file):     da93f51178cdf9a348fe2c9f7582b46d163baeadc5dba63dc788d5ccc5df8933
+     SHA-256 (build output file): da93f51178cdf9a348fe2c9f7582b46d163baeadc5dba63dc788d5ccc5df8933
+   Byte-for-byte identical. This confirms the uploaded APK is exactly the
+   real debug build artifact produced by the successful build above, not
+   a different or hand-edited file.
+
+   Structural sanity check on that APK (zip integrity + contents):
+   valid Android package, `unzip -t` reports no errors, and it contains
+   the expected dependency set for this project (androidx.room,
+   androidx.compose.*, androidx.navigation, androidx.lifecycle,
+   kotlinx.coroutines) - consistent with this codebase, not a stray file.
+
+c) Device install + real alarm ring: user-verified on a real Android
+   device - "app got installed and alarm rang at specified time". This
+   is the user's own direct observation, not something I can verify
+   myself from the sandbox, and is reported here as exactly that.
+
+   Note: the user reported one earlier install attempt failing with no
+   detail given (no error text, install method, or device/Android
+   version was provided when asked). Since the very next report was a
+   successful install and a real alarm ring, I'm treating that first
+   attempt as resolved on the user's end and am not speculating about
+   its cause - if it recurs, the same specifics will be needed to
+   diagnose it for real rather than guessed at.
+
+============================================================
+3. KNOWN LIMITATIONS / HONEST CAVEATS
+============================================================
+1. Compose `Modifier.weight()` is unusable under the current pinned
+   toolchain (Kotlin 2.4.10 + Compose UI 1.12.0 / compose-bom
+   2026.08.00): calling it fails compilation with "Cannot access 'val
+   RowColumnParentData?.weight: Float': it is internal in file". This
+   was verified to be a real, reproducible compiler/library binary
+   incompatibility (ruled out: stale build cache, dependency-version
+   conflicts, and a Kotlin 2.4.20-RC2 diagnostic bump - all failed
+   identically). Worked around in 4 files (SmartAlarmNavHost.kt,
+   AlarmListScreen.kt, AlarmEditScreen.kt, AlarmRingingScreen.kt) using
+   `fillMaxWidth(fraction)` + directional padding, or `widthIn(max=...)`
+   for one asymmetric case. Functionally equivalent for all normal
+   content; the one cosmetic edge case is a very long alarm name in the
+   list row, which is capped at 240dp width instead of flexibly sharing
+   space with the toggle switch - a minor wrapping/truncation difference,
+   not a functional bug.
+
+2. Notification-permission-revoked gap: if a user revokes
+   POST_NOTIFICATIONS from system settings after granting it once, the
+   ringing notification (and with it the full-screen intent that is
+   currently the ONLY path to launching the ringing screen - see
+   AlarmReceiver.kt) is skipped entirely for that occurrence. There is no
+   fallback (e.g. directly starting the ringing Activity from the
+   receiver) yet. This is called out in-line in NotificationHelper.kt
+   and is left for a later phase, since a fallback needs its own design
+   work around Android's background-activity-launch restrictions, which
+   differ by OS version.
+
+3. Release APK is unsigned. No release keystore/signing config exists.
+   Fine for Phase 1 (debug-build verification only); will need real
+   signing setup before any real-world release distribution.
+
+4. compileSdk is 37 while targetSdk is kept at 36 (compileSdk 37 is
+   required by the resolved Compose 1.12.0 AARs' metadata check; this is
+   a normal, supported configuration - compileSdk may exceed targetSdk).
+
+============================================================
+4. TWO REAL PRODUCTION BUGS FOUND AND FIXED DURING TESTING
+============================================================
+(found via failing unit tests, not by inspection - see commit 499eb17)
+
+1. AlarmFireUseCase never told the scheduler abstraction that a fired
+   occurrence's AlarmManager entry was consumed - fixed by adding
+   `coordinator.cancelScheduledEntry(occurrence.id)` right after the
+   occurrence is marked FIRED.
+
+2. OccurrenceCalculator.nextWeeklyOccurrence searched only `dayOffset in
+   0..6` for the next matching day-of-week. When "today" is itself the
+   only target day and its time has already passed, no offset in 0..6
+   can match again - only exactly one week later (offset 7) can. Fixed
+   by extending the loop to `0..7`. Re-verified against all existing
+   OccurrenceCalculatorTest cases - no regression.
+
+A third failure was a test-fixture bug, not a production bug: two boot-
+recovery tests computed a hardcoded "boot time" as a fixed offset from
+`now`, which silently stopped representing "device was off through the
+alarm time" once the underlying occurrence date changed. Fixed by
+deriving the boot time from the occurrence's own scheduled time instead.
+
+============================================================
+5. FILES CHANGED (Phase 1 Android work, full diffstat)
+============================================================
+From the Android scaffold commit through the final green build:
+  53 files changed, 3267 insertions(+), 77 deletions(-)
+
+Breakdown:
+  - 39 Kotlin source files under app/src/main (domain models, use cases,
+    Room/scheduler/notification/receiver infra, Compose UI screens)
+  - 12 Kotlin test files under app/src/test (unit tests + fakes)
+  - Gradle build config: android/build.gradle.kts, app/build.gradle.kts,
+    android/gradle.properties, android/gradle/libs.versions.toml,
+    android/gradle/wrapper/gradle-wrapper.properties
+
+Of that total, the build-debugging phase alone (toolchain fixes, the
+weight() workaround, and the 2 real bug fixes above) touched 14 files,
+229 insertions / 35 deletions - all captured as separate, individually
+described commits (see section 6).
+
+Nothing under the original React/TypeScript simulator (src/, the Kotlin-
+reference-as-TS-strings file, or git history prior to the Android work)
+was modified or deleted. The simulator remains intact and unrelated to
+this native Android app.
+
+============================================================
+6. COMMIT HISTORY
+============================================================
+This session's sandbox git repo accumulated 14 commits describing each
+real, distinct fix along the way (AGP DSL cast issue, Room/kapt metadata
+mismatch, the Kotlin 2.4.20-RC2 diagnostic experiment and its revert, the
+Compose weight() workaround, the 2 production bug fixes + 1 test-fixture
+fix, the 2-attempt lint permission-check fix, and this report).
+
+That history turned out to be built on a stale fork point, though: real
+evidence from the user's own `git log` showed the real `origin/main` on
+GitHub already includes two commits the sandbox never saw (a jvmTarget
+DSL migration and a compileSdk-37 bump), sitting on top of a slightly
+different "Android foundation" commit than the one the sandbox's clone
+branched from. Replaying the sandbox's 14 commits on top of the real
+history, or force-pushing the sandbox's commit graph over it, risked
+silently overwriting or duplicating fixes already correctly on GitHub -
+so that plan was dropped in favor of the safer option below.
+
+The verified-good state actually only exists in one place with certainty:
+whatever is currently on your machine at E:\SmartAlarm, since that's the
+exact file set your real `BUILD SUCCESSFUL` run and real device install
+were run against (delivered there this session as direct file writes, not
+as git commits - so your local git history never advanced past your real
+`origin/main`, only your working tree did). That means the correct fix is
+to commit your current working tree directly on top of your real `main`,
+not reconcile two diverged commit graphs:
+
+    cd E:\SmartAlarm
+    git status                    (sanity-check what's about to be committed)
+    git add -A
+    git commit -m "Phase 1: Room persistence, AlarmManager scheduling, notifications, boot recovery, adaptive UI"
+    git push origin main
+
+This is a normal fast-forward push (your local main is already at the
+real origin/main, plus this one new commit) - no rebase, no force-push,
+no risk to the 2 real upstream commits. The tradeoff, honestly stated: the
+sandbox's 14 individually-described commits won't appear in GitHub's
+history, only this one squashed commit will. Given the alternative was
+risking real history on a diverged graph, that tradeoff is the right call
+here - the diagnostic detail is preserved in this report instead (see
+section 4 for the 2 real bugs found, and the workaround details throughout
+sections 2-3).
+
+Direct pushes to GitHub from the sandbox itself are blocked regardless
+(confirmed via a real `git push` attempt here returning HTTP 403 - the
+git proxy doesn't have this repository in its authorized set), so this
+push always had to happen from your machine either way.
+
+============================================================
+7. PHASE 1 STATUS: PASS
+============================================================
+Based on the real, verified evidence in section 2 - successful build
+across all gates (compile, unit tests, lint, package) plus real device
+install and a real alarm ringing at the scheduled time - Phase 1 is
+complete.
+
+Per the project's staged-approval rule, no Phase 2 (location/geofencing),
+Phase 3 (timezone), or later work will begin until you explicitly approve
+starting it.

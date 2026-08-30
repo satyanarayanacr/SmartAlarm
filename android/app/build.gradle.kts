@@ -4,6 +4,7 @@ plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
+    alias(libs.plugins.kotlin.kapt)
 }
 
 android {
@@ -17,8 +18,8 @@ android {
         applicationId = "com.smartalarm.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 1
-        versionName = "0.1.0-foundation"
+        versionCode = 2
+        versionName = "0.2.0-phase1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -57,6 +58,7 @@ android {
     testOptions {
         unitTests {
             isIncludeAndroidResources = true
+            isReturnDefaultValues = true
         }
     }
 }
@@ -67,17 +69,52 @@ kotlin {
     }
 }
 
+// Room schema export location - required so future phases can add non-destructive migrations
+// instead of falling back to destructive table drops when the schema changes. Room's annotation
+// processor runs via kapt (see the kotlin-kapt plugin above and the kapt(...) dependency below)
+// rather than KSP - see the long comment on `kotlin` in gradle/libs.versions.toml for why.
+kapt {
+    arguments {
+        arg("room.schemaLocation", "$projectDir/schemas")
+        arg("room.incremental", "true")
+    }
+}
+
+// Room 2.8.4 bundles a kotlin-metadata-jvm that only reads Kotlin metadata up to version 2.3.0,
+// but our Kotlin 2.4.10 compiler stamps classes with metadata version 2.4.0 - kapt's annotation
+// processing round fails reading Room's own generated stubs with:
+//   "Provided Metadata instance has version 2.4.0, while maximum supported version is 2.3.0."
+// Forcing the newer, Kotlin-2.4.10-published kotlin-metadata-jvm onto every configuration
+// (including the kapt annotation-processor classpath) fixes the read. See the long comment on
+// `room` in gradle/libs.versions.toml for the full explanation and evidence.
+configurations.all {
+    resolutionStrategy {
+        force(libs.kotlin.metadata.jvm)
+    }
+}
+
 dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
+    implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.androidx.activity.compose)
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.ui)
     implementation(libs.androidx.ui.graphics)
     implementation(libs.androidx.ui.tooling.preview)
     implementation(libs.androidx.material3)
+    implementation(libs.androidx.navigation.compose)
+
+    implementation(libs.androidx.room.runtime)
+    implementation(libs.androidx.room.ktx)
+    kapt(libs.androidx.room.compiler)
+
+    implementation(libs.kotlinx.coroutines.android)
 
     testImplementation(libs.junit)
+    testImplementation(libs.kotlinx.coroutines.test)
+    testImplementation(libs.androidx.arch.core.testing)
+    testImplementation(libs.androidx.room.testing)
 
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)

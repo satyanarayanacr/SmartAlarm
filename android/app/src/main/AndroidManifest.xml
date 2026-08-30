@@ -2,15 +2,26 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <!--
-        Foundation milestone: no runtime permissions are declared yet.
+        Phase 1 permissions - exactly what this phase's real functionality uses, nothing from
+        later phases (no location permissions yet; those are Phase 3).
 
-        Phase 1 will add: SCHEDULE_EXACT_ALARM / USE_EXACT_ALARM, RECEIVE_BOOT_COMPLETED,
-        POST_NOTIFICATIONS, WAKE_LOCK, USE_FULL_SCREEN_INTENT, VIBRATE.
-        Phase 3 will add: ACCESS_FINE_LOCATION, ACCESS_COARSE_LOCATION,
-        ACCESS_BACKGROUND_LOCATION.
-        These are intentionally omitted here so the empty-app milestone reflects only what
-        it actually uses.
+        SCHEDULE_EXACT_ALARM: lets the app request exact-alarm scheduling on Android 12+ (the
+            user must still grant it via Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM, handled by
+            MainActivity's permission banner).
+        RECEIVE_BOOT_COMPLETED: lets BootReceiver reschedule alarms from Room after a reboot.
+        POST_NOTIFICATIONS: Android 13+ runtime permission for showing the ringing notification.
+        WAKE_LOCK: keeps the CPU awake long enough for AlarmReceiver's coroutine and the ringing
+            notification/activity to start when the device is asleep.
+        USE_FULL_SCREEN_INTENT: required to show AlarmRingingActivity over the lock screen via a
+            full-screen notification intent.
+        VIBRATE: alarm vibration pattern in AlarmRingingActivity.
     -->
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
+    <uses-permission android:name="android.permission.VIBRATE" />
 
     <application
         android:name=".SmartAlarmApplication"
@@ -30,6 +41,35 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!--
+            Lock-screen visibility (setShowWhenLocked/setTurnScreenOn on API 27+, or the
+            equivalent WindowManager flags below API 27) is set in code in
+            AlarmRingingActivity.onCreate() - there is no manifest attribute for it.
+        -->
+        <activity
+            android:name=".ui.ringing.AlarmRingingActivity"
+            android:exported="false"
+            android:launchMode="singleInstance"
+            android:excludeFromRecents="true"
+            android:theme="@style/Theme.SmartAlarm" />
+
+        <receiver
+            android:name=".receiver.AlarmReceiver"
+            android:exported="false" />
+
+        <receiver
+            android:name=".receiver.AlarmActionReceiver"
+            android:exported="false" />
+
+        <receiver
+            android:name=".receiver.BootReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
 
     </application>
 

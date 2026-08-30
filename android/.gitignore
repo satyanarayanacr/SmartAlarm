@@ -39,3 +39,11 @@ captures/
 # Log/profiling
 *.log
 .kotlin/
+
+# Ad-hoc debug output and scripts from interactive build troubleshooting -
+# not part of the app, machine-specific, and not meant to be shared.
+build_error.txt
+build_test.txt
+build_clean.txt
+deps.txt
+run_kapt_debug.bat
