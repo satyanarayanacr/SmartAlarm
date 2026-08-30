@@ -48,7 +48,10 @@ class SkipOccurrenceUseCaseTest {
 
         assertTrue(repository.getAlarm(alarm.id)!!.isEnabled)
         assertEquals(OccurrenceStatus.SKIPPED, repository.getOccurrence(occurrenceId)!!.status)
-        assertEquals(0, scheduler.activeCount()) // AlarmManager entry cancelled for the skipped occurrence...
+        assertTrue(!scheduler.isCurrentlyScheduled(occurrenceId)) // this occurrence's own entry is cancelled...
+        // ...but the alarm is still enabled and WEEKLY, so its next occurrence (Friday) is scheduled
+        // immediately - activeCount is 1, not 0. (See the next test for the full "which day" proof.)
+        assertEquals(1, scheduler.activeCount())
     }
 
     // Spec test 11 + spec example: "Monday skipped, Tuesday remains scheduled".

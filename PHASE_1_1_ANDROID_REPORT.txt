@@ -329,62 +329,108 @@ Existing Phase 1 test files were not deleted or reduced; the only
 existing test file touched is RescheduleAllUseCaseTest.kt, which had
 tests ADDED and its constructor call updated for the new parameter -
 all 4 of its original tests are unchanged (spec test 18: existing Phase
-1 tests continue to pass - see section 15 for why this is not yet
-verified).
+1 tests continue to pass - see section 15 for the real build evidence).
 
 ============================================================
 14. TESTS EXECUTED
 ============================================================
-NONE HAVE BEEN RUN YET. This sandbox has no Android SDK, JDK/Gradle
-Android toolchain, or emulator/device - all real Gradle builds and test
-runs for this project happen on your Windows machine at E:\SmartAlarm,
-exactly as in Phase 1. See section 15/16/17.
+Real Gradle builds/tests were run on the user's Windows machine
+(E:\SmartAlarm\android), not in the sandbox (which has no Android SDK/
+Gradle toolchain). Sequence of real runs, in order:
+
+  1. `gradlew.bat clean build` - FAILED. testDebugUnitTest reported
+     "65 tests completed, 1 failed":
+       SkipOccurrenceUseCaseTest > skipping an occurrence does not
+       disable the recurring alarm FAILED (java.lang.AssertionError)
+     Root-caused (see section 19) to an incorrect assertion in the TEST
+     file itself, not a bug in the app: after skipping a WEEKLY
+     occurrence, the alarm's next occurrence is correctly scheduled
+     immediately, so the fake scheduler's active count should be 1, not
+     0, right after the skip. The test asserted 0. Fixed in
+     SkipOccurrenceUseCaseTest.kt and redelivered to the user's machine.
+     (This run also hit one unrelated, non-reproducing kaptReleaseKotlin
+     failure caused by a stale Gradle configuration-cache entry - see
+     section 19.)
+  2. `gradlew.bat clean build --no-configuration-cache` (with the test
+     fix in place) - BUILD SUCCESSFUL, 109 actionable tasks (53
+     executed, 55 from cache, 1 up-to-date). This is the same total
+     task-graph size as run 1, where testDebugUnitTest's failure had
+     taken the whole build down - a clean success on the identical
+     graph means every task in it, including testDebugUnitTest,
+     succeeded this time (a failing test task fails the whole `build`,
+     as demonstrated by run 1).
+  3. `gradlew.bat assembleDebug --no-configuration-cache` - BUILD
+     SUCCESSFUL (also run standalone earlier, consistently successful).
 
 ============================================================
 15. TEST RESULTS
 ============================================================
-Not available yet - no build has been run. This section will be updated
-honestly once you report back the real output of the commands in
-section 16.
+All unit tests pass, including the corrected Phase 1.1 test and all
+pre-existing Phase 1 tests (spec test 18: existing tests continue to
+pass). lintReportDebug also completed with an HTML/SARIF report written
+(no build-blocking lint errors - the build would not have reached
+BUILD SUCCESSFUL otherwise).
+
+Caveat, stated plainly: the terminal output pasted back for the
+successful run does not show the literal "testDebugUnitTest" task line
+or an explicit "65 tests completed, 0 failed" count, because Gradle's
+live console only reprints a task's line when it has fresh output
+(warnings, failures); a silently-passing task doesn't get its own line
+in the final pasted buffer. The conclusion that all tests pass is
+inferred from build mechanics (see section 14, run 2), not from
+literally seeing a passing test count. If you want the fully explicit
+count for your own records, `gradlew.bat test --no-configuration-cache`
+run on its own will print it clearly.
 
 ============================================================
 16. BUILD COMMANDS TO RUN
 ============================================================
-On your machine, after the new/changed files below have been placed into
-E:\SmartAlarm\android (see section 19 for delivery), run:
+Already run - see section 14. For future reference / re-verification:
 
-    gradlew.bat clean build
-    gradlew.bat assembleDebug
+    gradlew.bat clean build --no-configuration-cache
+    gradlew.bat assembleDebug --no-configuration-cache
 
-Please paste back the actual, complete, verbatim output of both
-commands (or at least the final summary plus any FAILED/error lines),
-including any Kotlin compiler errors, KAPT/Room annotation-processor
-errors, unit test failures, or Lint errors. I will fix any real issues
-that surface using that evidence - nothing in this report is a
-substitute for that.
+(--no-configuration-cache is recommended based on this phase's
+experience - a stale configuration-cache entry caused one spurious,
+non-reproducing kaptReleaseKotlin failure; see section 19.)
 
 ============================================================
 17. BUILD RESULT
 ============================================================
-NOT YET RUN. Per this project's standing rule, I am not claiming Phase
-1.1 builds or works until a real `gradlew.bat clean build` /
-`assembleDebug` run on your machine actually succeeds and you report the
-output back to me.
+BUILD SUCCESSFUL - verified with real output from the user's machine
+(see section 14, runs 2 and 3). Both `clean build` and `assembleDebug`
+succeeded after the test fix was applied.
 
 ============================================================
 18. APK PATH
 ============================================================
-NOT YET AVAILABLE. No APK has been built for Phase 1.1. Once you report
-a successful assembleDebug, I will ask you to run a directory listing
-(or I will verify via the device bridge) to get the real path and a
-SHA-256 hash, the same verification approach used in Phase 1 - I will
-not invent or guess a path.
+Verified, not invented - confirmed via real `dir` and `certutil` output
+from the user's machine, run twice with identical results:
+
+    E:\SmartAlarm\android\app\build\outputs\apk\debug\app-debug.apk
+    Size: 12,459,211 bytes
+    SHA-256: ff23a4fcd21498fc75c47d67d02da8aed53bfb8519bc0a0d60fb1cdbcb3c5241
 
 ============================================================
 19. KNOWN LIMITATIONS
 ============================================================
-- Not yet build-verified (see sections 14-18) - this is the most
-  important open item.
+- One test bug was found and fixed during verification (see sections 14
+  and 15): SkipOccurrenceUseCaseTest.kt's "does not disable the
+  recurring alarm" test asserted the fake scheduler's active count was
+  0 right after a skip; the correct value is 1, because skipping a
+  still-enabled WEEKLY occurrence immediately schedules that alarm's
+  next occurrence (by design - see section 3). This was a test-authoring
+  mistake, not an app defect; the app's actual behavior was already
+  correct and is what the fix now correctly asserts.
+- One non-reproducing kaptReleaseKotlin failure occurred on the first
+  build attempt, with a generic Gradle error and no underlying cause
+  reported. Isolated re-run of just that task with
+  `--stacktrace --no-configuration-cache` succeeded cleanly with no
+  errors, and it did not recur on subsequent full builds. This points to
+  a stale/corrupted Gradle configuration-cache entry (the failing run's
+  own log noted "Configuration cache entry reused"), unrelated to any
+  Phase 1.1 code. Recommendation: pass --no-configuration-cache if this
+  ever recurs, or clear the .gradle configuration-cache directory.
 - The confirmation notification's "Review" action opens the app to the
   review screen; if notification permission (Android 13+
   POST_NOTIFICATIONS) is denied, no confirmation notification can be
@@ -408,9 +454,11 @@ not invent or guess a path.
   tests were added for the new screens; the spec allows this
   ("Add instrumented/UI tests where practical") and treats manual device
   testing (section 20) as the primary verification for UI behavior.
-- The version-2 Room schema JSON snapshot (app/schemas) has not been
-  generated yet, since it is produced by the Kotlin/KAPT compiler at
-  build time and no build has run in this sandbox.
+- The version-2 Room schema JSON snapshot (app/schemas) is generated by
+  the Kotlin/KAPT compiler on your machine during a real build; it does
+  not exist in this sandbox (which has no Android toolchain), so it was
+  never reviewed as part of this report - only the migration SQL itself
+  (section 12) was reviewed by hand.
 
 ============================================================
 20. MANUAL DEVICE TEST CHECKLIST
