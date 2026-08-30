@@ -9,16 +9,6 @@ import com.smartalarm.app.domain.model.ConfirmationSettings
  * Phase 1.1: adds the single-row `confirmation_settings` table. Nothing about the existing
  * `alarms` / `alarm_occurrences` tables changes - [com.smartalarm.app.domain.model.OccurrenceStatus.SKIPPED]
  * is a new *value* of an existing TEXT column, not a schema change Room needs to know about.
- *
- * Non-destructive by design (per the Phase 1.1 spec's "do not recreate the database... do not use
- * destructive migration"): a real device already running Phase 1 has real alarms and occurrences
- * in its `alarms`/`alarm_occurrences` tables, and this migration only adds a new table alongside
- * them - CREATE TABLE IF NOT EXISTS, no ALTER/DROP on the existing tables at all.
- *
- * The settings row is seeded here with the shipped defaults (enabled, 21:00) so an upgrading
- * install has a fully valid settings row immediately, without depending on a first-run write
- * happening before anything tries to read it (e.g. BootReceiver running before MainActivity ever
- * opens). `INSERT OR IGNORE` makes re-running this migration (should Room ever retry it) safe.
  */
 val MIGRATION_1_2 = object : Migration(1, 2) {
     override fun migrate(db: SupportSQLiteDatabase) {
@@ -48,3 +38,18 @@ val MIGRATION_1_2 = object : Migration(1, 2) {
         )
     }
 }
+
+/**
+ * Phase 1.2: adds per-alarm confirmation configuration columns to the `alarms` table.
+ *
+ * Non-destructive migration: alters existing `alarms` table with default values (enabled = 1,
+ * hour = 21, minute = 0), preserving all existing alarms and their occurrences intact.
+ */
+val MIGRATION_2_3 = object : Migration(2, 3) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE `alarms` ADD COLUMN `isConfirmationEnabled` INTEGER NOT NULL DEFAULT 1")
+        db.execSQL("ALTER TABLE `alarms` ADD COLUMN `confirmationHour` INTEGER NOT NULL DEFAULT 21")
+        db.execSQL("ALTER TABLE `alarms` ADD COLUMN `confirmationMinute` INTEGER NOT NULL DEFAULT 0")
+    }
+}
+

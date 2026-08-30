@@ -1,0 +1,455 @@
+================================================================================
+SMART ALARM ANDROID APPLICATION: END-TO-END ARCHITECTURAL & CODE AUDIT REPORT
+PHASES 1, 1.1, 2, 3, AND 4 AUDIT
+================================================================================
+Audit Date: August 30, 2026
+Role: Senior Android Architect, QA Engineer, and Release Engineer
+Target Platform: Android (API 26 to API 35) — Phone & Tablet Compatible
+Document Format: Plain Text (.txt) per engineering audit standards
+================================================================================
+
+TABLE OF CONTENTS
+--------------------------------------------------------------------------------
+1. Executive Summary & Verification Methodology
+2. Codebase Inventory & Architectural Map
+3. Phase-by-Phase Implementation Audit
+   3.1. Phase 1: Core Alarm Engine & Ringing Lifecycle
+   3.2. Phase 1.1: Daily Alarm Confirmation ("Ask Before Next Alarm")
+   3.3. Phase 2: Adaptive Recurring Alarms & Individual Occurrence Management
+   3.4. Phase 3: Location / Zone-Aware Alarms & Geofencing Engine
+   3.5. Phase 4: Timezone-Aware Alarms & Device Timezone Changes
+4. Deep-Dive Gap Analysis & Critical Deficiencies
+5. Database Schema & Migration Analysis (Room v1 -> v2 -> Future)
+6. Android Manifest, Permissions, Background Services & Play Store Readiness
+7. Build System, Tooling & Test Suite Status
+8. Prioritized Remediation & Implementation Roadmap (P0 - P3)
+
+================================================================================
+1. EXECUTIVE SUMMARY & VERIFICATION METHODOLOGY
+================================================================================
+
+This audit was conducted via direct, line-by-line inspection of all source files,
+build configuration scripts, database schemas, Room migration definitions,
+test classes, Android manifest configurations, and resource files in `/android`.
+Previous AI-generated reports and claims of completion were disregarded in favor
+of physical verification of the codebase.
+
+AUDIT VERDICT SUMMARY:
+--------------------------------------------------------------------------------
+- PHASE 1 (Core Alarm Engine):
+  STATUS: FULLY IMPLEMENTED (Production Quality)
+  Verified components: Room persistence (`alarms`, `alarm_occurrences`),
+  `AndroidAlarmScheduler` (AlarmManager `setExactAndAllowWhileIdle`),
+  `AlarmReceiver` (WAKEUP broadcast), `AlarmRingingActivity` (lock-screen UI,
+  `MediaPlayer`, `Vibrator`), notification actions, and tablet adaptive Compose layout.
+
+- PHASE 1.1 (Daily Confirmation / Review):
+  STATUS: PARTIALLY IMPLEMENTED (Architectural Defect Identified)
+  Verified components: `ConfirmationSettingsEntity`, `AndroidConfirmationScheduler`,
+  `ConfirmationReceiver`, `ConfirmationActionReceiver`, `ConfirmationReviewScreen`,
+  `ConfirmationSettingsScreen`.
+  CRITICAL DEFECT: Confirmation is implemented as a global application-level
+  singleton (`SINGLETON_ID = 1`) rather than a per-alarm configuration. While a
+  global default is helpful, individual alarms lack a `confirmationEnabled` /
+  `askBeforeAlarm` property in the `alarms` table and entity model.
+
+- PHASE 2 (Adaptive Recurring Alarms & Individual Occurrence Management):
+  STATUS: PARTIALLY IMPLEMENTED / GAPS DETECTED
+  Verified components: Basic recurring alarm calculation (`NextOccurrenceCalculator`)
+  and `alarm_occurrences` table exist with states `SCHEDULED`, `DISMISSED`, `SNOOZED`,
+  `SKIPPED`.
+  CRITICAL GAPS: Only a single upcoming occurrence is generated and scheduled at
+  any given time. There is no multi-occurrence rolling projection window, no batch
+  calendar projection, no visual calendar/agenda matrix for editing distinct future
+  occurrences independently before they become the immediate next occurrence, and
+  no skip/shift history trail.
+
+- PHASE 3 (Location / Zone-Aware Alarms):
+  STATUS: NOT IMPLEMENTED IN ANDROID CODEBASE
+  CRITICAL GAPS: Zero location entities, zero geofencing APIs, zero location
+  permissions in `AndroidManifest.xml` (`ACCESS_FINE_LOCATION`,
+  `ACCESS_BACKGROUND_LOCATION`), no location evaluation engine, and no location UI
+  in `AlarmEditScreen`.
+
+- PHASE 4 (Timezone-Aware Alarms):
+  STATUS: NOT IMPLEMENTED IN ANDROID CODEBASE
+  CRITICAL GAPS: No `ACTION_TIMEZONE_CHANGED` broadcast receiver, no timezone
+  preference fields (`timezoneId`, `timezoneShiftPolicy`) in the database,
+  and no timezone transition handling or user adjustment workflows.
+
+================================================================================
+2. CODEBASE INVENTORY & ARCHITECTURAL MAP
+================================================================================
+
+The Android project is structured as follows under `/android/app/src/main/java/com/smartalarm/app`:
+
+Data Layer (`/data`):
+- `data/local/SmartAlarmDatabase.kt`: Room database definition (Schema Version 2, with `MIGRATION_1_2`).
+- `data/local/dao/AlarmDao.kt`: CRUD operations and Reactive Flows for `AlarmEntity`.
+- `data/local/dao/AlarmOccurrenceDao.kt`: Queries and status updates for `AlarmOccurrenceEntity`.
+- `data/local/dao/ConfirmationSettingsDao.kt`: Singleton getter/upserter for `ConfirmationSettingsEntity`.
+- `data/local/entity/AlarmEntity.kt`: Core alarm table (`alarms`).
+- `data/local/entity/AlarmOccurrenceEntity.kt`: Occurrence table (`alarm_occurrences`).
+- `data/local/entity/ConfirmationSettingsEntity.kt`: Singleton table (`confirmation_settings`).
+- `data/repository/AlarmRepositoryImpl.kt`: Implements `AlarmRepository` wrapping DAOs with mapping extensions.
+
+Domain Layer (`/domain`):
+- `domain/model/Alarm.kt`: Domain model with `RepeatType` (`ONE_TIME`, `WEEKLY`).
+- `domain/model/AlarmOccurrence.kt`: Domain model with `OccurrenceStatus`.
+- `domain/model/ConfirmationSettings.kt`: Domain model for daily confirmation.
+- `domain/repository/AlarmRepository.kt`: Repository interface.
+- `domain/usecase/AlarmFireUseCase.kt`: Evaluates fired occurrence, transitions status, schedules next.
+- `domain/usecase/CalculateNextOccurrenceUseCase.kt`: Computes next trigger timestamp.
+- `domain/usecase/CreateOrUpdateAlarmUseCase.kt`: Validates, saves, and schedules alarm.
+- `domain/usecase/DeleteAlarmUseCase.kt`: Cleans up database and cancels pending intents.
+- `domain/usecase/DismissOccurrenceUseCase.kt`: Marks dismissed and schedules next if recurring.
+- `domain/usecase/GetTomorrowsConfirmableOccurrencesUseCase.kt`: Queries confirmable occurrences.
+- `domain/usecase/KeepOccurrencesUseCase.kt`: Confirms occurrences to stay scheduled.
+- `domain/usecase/NextOccurrenceCalculator.kt`: Pure calendar arithmetic calculation.
+- `domain/usecase/RescheduleAllUseCase.kt`: Re-registers all active alarms on boot.
+- `domain/usecase/ScheduleDailyConfirmationUseCase.kt`: Schedules the daily confirmation check.
+- `domain/usecase/SkipOccurrencesUseCase.kt`: Marks occurrences `SKIPPED` and schedules following.
+- `domain/usecase/SnoozeOccurrenceUseCase.kt`: Computes snooze offset and updates occurrence.
+- `domain/usecase/ToggleAlarmEnabledUseCase.kt`: Toggles alarm enabled state and synchronizes scheduler.
+- `domain/usecase/UpdateConfirmationSettingsUseCase.kt`: Updates settings and reschedules confirmation.
+
+Scheduling Layer (`/scheduler`):
+- `scheduler/AlarmScheduler.kt`: Interface for exact alarm scheduling.
+- `scheduler/AndroidAlarmScheduler.kt`: Concrete `AlarmManager` implementation.
+- `scheduler/ConfirmationScheduler.kt`: Interface for confirmation scheduling.
+- `scheduler/AndroidConfirmationScheduler.kt`: Concrete `AlarmManager` implementation for daily review.
+
+Receiver & Notification Layer (`/receiver`, `/notification`):
+- `receiver/AlarmReceiver.kt`: `ACTION_ALARM_FIRED` receiver with `goAsync()`.
+- `receiver/AlarmActionReceiver.kt`: `ACTION_SNOOZE` and `ACTION_DISMISS` notification button receiver.
+- `receiver/BootReceiver.kt`: `ACTION_BOOT_COMPLETED` & `ACTION_MY_PACKAGE_REPLACED` receiver.
+- `receiver/ConfirmationReceiver.kt`: `ACTION_DAILY_CONFIRMATION` trigger receiver.
+- `receiver/ConfirmationActionReceiver.kt`: `ACTION_KEEP_ALL` confirmation action receiver.
+- `notification/NotificationHelper.kt`: Notification channel setup and builder for ringing and review.
+
+UI Layer (`/ui`):
+- `ui/alarms/AlarmListScreen.kt`: Alarm list composable with switch toggles and next occurrence preview.
+- `ui/alarms/AlarmEditScreen.kt`: TimePicker, name, repeat days, vibrate, snooze controls.
+- `ui/alarms/AlarmListViewModel.kt`: ViewModel for alarm list.
+- `ui/confirmation/ConfirmationReviewScreen.kt`: Review UI for tomorrow's confirmable alarms.
+- `ui/confirmation/ConfirmationSettingsScreen.kt`: Daily confirmation toggle and time picker.
+- `ui/confirmation/ConfirmationViewModel.kt`: ViewModel for confirmation features.
+- `ui/navigation/SmartAlarmNavHost.kt`: Adaptive navigation (compact vs. two-pane wide layout).
+- `ui/ringing/AlarmRingingActivity.kt`: Full-screen lock-screen Activity.
+- `ui/ringing/AlarmRingingScreen.kt`: Compose UI for ringing screen.
+- `ui/theme/*`: Material 3 theme, typography, color palettes.
+
+Dependency Injection & Application:
+- `ServiceLocator.kt`: Manual DI container managing repository, use cases, and schedulers.
+- `SmartAlarmApplication.kt`: Application entry point initializing ServiceLocator and notification channels.
+- `MainActivity.kt`: Main Activity with exact alarm and POST_NOTIFICATIONS permission handling.
+
+================================================================================
+3. PHASE-BY-PHASE IMPLEMENTATION AUDIT
+================================================================================
+
+--------------------------------------------------------------------------------
+3.1. PHASE 1: CORE ALARM ENGINE & RINGING LIFECYCLE
+--------------------------------------------------------------------------------
+Status: FULLY IMPLEMENTED (Grade: A)
+
+Strengths:
+1. Exact Alarm Execution: Uses `AlarmManager.setExactAndAllowWhileIdle(RTC_WAKEUP, ...)`
+   with deterministic PendingIntent request codes based on occurrence ID.
+2. Background Durability: `AlarmReceiver` employs `goAsync()` with coroutine
+   dispatching to ensure Room updates and notification posting complete without
+   process termination.
+3. Lock-Screen Ringing Experience: `AlarmRingingActivity` sets `setShowWhenLocked(true)`,
+   `setTurnScreenOn(true)`, `FLAG_KEEP_SCREEN_ON`, and runs as `singleInstance`.
+   Properly initializes `MediaPlayer` on the alarm audio stream with looping playback
+   and `Vibrator` waveform patterns.
+4. Reschedule on Reboot: `BootReceiver` listens to both `BOOT_COMPLETED` and
+   `MY_PACKAGE_REPLACED` to restore all scheduled occurrences from Room.
+5. Adaptive UI: `SmartAlarmNavHost` handles both compact (phone) and expanded
+   (tablet >= 600dp) window widths gracefully.
+
+Identified Minor Deficiencies:
+- If `POST_NOTIFICATIONS` is revoked on Android 13+ (API 33+), `NotificationHelper.showRinging`
+  is skipped. Under modern Android background activity launch restrictions, there is no
+  secondary fallback foreground service if the notification cannot be posted.
+
+--------------------------------------------------------------------------------
+3.2. PHASE 1.1: DAILY ALARM CONFIRMATION ("ASK BEFORE NEXT ALARM")
+--------------------------------------------------------------------------------
+Status: PARTIALLY IMPLEMENTED (Grade: B-)
+
+Strengths:
+1. Complete End-to-End Scheduling: `AndroidConfirmationScheduler` schedules the
+   daily evaluation at the configured time (default 21:00 / 9:00 PM).
+2. Non-Intrusive Defaults: If the user does not respond or notifications are disabled,
+   alarms remain `SCHEDULED` (safe fail-open behavior).
+3. Notification and Review UI: Interactive notification supports "Keep All" (direct
+   broadcast action) and "Review" (deep link to `ConfirmationReviewScreen`).
+4. Granular Selection: `ConfirmationReviewScreen` allows selecting individual alarms
+   to keep or skip.
+
+Critical Architectural Deficiencies:
+1. Global-Only Configuration: The setting exists solely as a global singleton in
+   `confirmation_settings` (`SINGLETON_ID = 1`).
+2. Missing Per-Alarm Override: The user cannot enable confirmation for a specific
+   early-morning work alarm while disabling it for an essential medication alarm.
+   The `alarms` table lacks a `confirmationEnabled` / `askBeforeAlarm` boolean column.
+
+--------------------------------------------------------------------------------
+3.3. PHASE 2: ADAPTIVE RECURRING ALARMS & OCCURRENCE MANAGEMENT
+--------------------------------------------------------------------------------
+Status: PARTIALLY IMPLEMENTED / DEFICIENT (Grade: C-)
+
+Strengths:
+1. Relational Occurrence Model: Separate `alarms` and `alarm_occurrences` tables
+   with foreign key constraints (`CASCADE` delete) and index on `alarmId`.
+2. Status Tracking: Occurrences support statuses `SCHEDULED`, `DISMISSED`, `SNOOZED`,
+   and `SKIPPED`.
+
+Critical Missing Features:
+1. Single-Occurrence Limitation: When an alarm is created or fires, only the
+   single immediate next occurrence is calculated and stored.
+2. No Multi-Occurrence Rolling Window: The system does not project a 7-day or 14-day
+   window of upcoming occurrences.
+3. No Individual Occurrence Editing: Users cannot modify the time, location, or
+   state of a specific future date's occurrence without altering the parent recurring
+   rule.
+4. No Occurrence Override Schema: There is no mechanism in `alarm_occurrences` to store
+   occurrence-specific time offsets or custom labels.
+
+--------------------------------------------------------------------------------
+3.4. PHASE 3: LOCATION / ZONE-AWARE ALARMS & GEOFENCING ENGINE
+--------------------------------------------------------------------------------
+Status: NOT IMPLEMENTED (Grade: F)
+
+Findings:
+1. Data Model: Zero location entities. No `LocationZone`, no latitude/longitude/radius
+   fields on `AlarmEntity`.
+2. Permissions: No `ACCESS_FINE_LOCATION`, `ACCESS_COARSE_LOCATION`, or
+   `ACCESS_BACKGROUND_LOCATION` in `AndroidManifest.xml`.
+3. Geofencing Infrastructure: No Google Play Services Location / Android LocationManager
+   geofence transition receivers or geofence client wrappers.
+4. Alarm Decision Engine: No condition evaluation in `AlarmFireUseCase` or
+   `CalculateNextOccurrenceUseCase` to check whether the device is inside or outside
+   a target zone.
+5. User Interface: `AlarmEditScreen` has no zone selection, map picker, or radius
+   controls.
+
+--------------------------------------------------------------------------------
+3.5. PHASE 4: TIMEZONE-AWARE ALARMS & DEVICE TIMEZONE CHANGES
+--------------------------------------------------------------------------------
+Status: NOT IMPLEMENTED (Grade: F)
+
+Findings:
+1. Data Model: `AlarmEntity` stores `hour` and `minute` as local integers without an
+   associated `timeZoneId` or `timezonePolicy` enum (`STICK_TO_LOCAL_TIME`,
+   `PRESERVE_UTC_INSTANT`, `PROMPT_ON_CHANGE`).
+2. System Receivers: `AndroidManifest.xml` does NOT register a receiver for
+   `Intent.ACTION_TIMEZONE_CHANGED` or `Intent.ACTION_TIME_CHANGED`.
+3. Timezone Change Handling: If the device moves from EST (UTC-5) to PST (UTC-8),
+   AlarmManager triggers relative to the new device timezone without any detection,
+   logging, rescheduling validation, or user prompt.
+4. UI: No timezone settings or timezone conflict resolution dialogs.
+
+================================================================================
+4. DEEP-DIVE GAP ANALYSIS & CRITICAL DEFICIENCIES
+================================================================================
+
+GAP 1: Confirmation Settings Architectural Mismatch
+- Current State: `ConfirmationSettingsEntity` has primary key `id = 1`
+  (global singleton).
+- Required State: A global default in `confirmation_settings` PLUS a per-alarm
+  property `isConfirmationEnabled: Boolean` in `AlarmEntity` and `alarms` table.
+- Impact: A user cannot toggle confirmation on a per-alarm basis.
+
+GAP 2: Recurring Occurrence Engine Architecture
+- Current State: `CalculateNextOccurrenceUseCase` returns a single `Long` epoch millis.
+- Required State: A projection engine that generates and manages a rolling window
+  of occurrences (e.g. next 14 days), allowing individual occurrences to have
+  overrides (e.g. customized trigger time, skip status, or zone override).
+
+GAP 3: Missing Location & Geofencing Layer
+- Current State: Location is completely absent from the Android codebase.
+- Required State:
+  * Entities: `LocationZoneEntity` (`id`, `name`, `latitude`, `longitude`, `radiusMeters`).
+  * Relations: `alarm_location_cross_ref` or `locationZoneId` foreign key on `alarms`.
+  * Logic: Trigger rules (`RING_ONLY_IF_AT_LOCATION`, `DISMISS_IF_AT_LOCATION`,
+    `ADJUST_TIME_BY_LOCATION`).
+  * Services: Geofence transition receiver and location provider integration.
+
+GAP 4: Missing Timezone Engine
+- Current State: No timezone awareness.
+- Required State:
+  * Database: `timeZoneId` (e.g. "America/New_York") and `timezonePolicy` on `AlarmEntity`.
+  * Receivers: `TimezoneChangeReceiver` listening to `android.intent.action.TIMEZONE_CHANGED`
+    and `android.intent.action.TIME_SET`.
+  * Usecase: `HandleTimezoneChangeUseCase` to iterate all active alarms, recalculate
+    UTC triggers based on policy, and update AlarmManager schedules.
+
+GAP 5: Compose UI 1.12.0 `Modifier.weight` Workaround
+- In `SmartAlarmNavHost.kt`, `AlarmListScreen.kt`, and `AlarmEditScreen.kt`,
+  `RowScope.weight()` was replaced with `Modifier.fillMaxWidth(fraction)` due to an
+  internal compiler accessibility issue with `RowColumnParentData?.weight` in the
+  current Kotlin/Compose toolchain combination. This workaround functions properly
+  and maintains 50/50 tablet split layouts, but should be documented.
+
+================================================================================
+5. DATABASE SCHEMA & MIGRATION ANALYSIS
+================================================================================
+
+Current Database Version: 2
+
+Schema V1 (Phase 1):
+- `alarms`:
+  * `id` (INTEGER PRIMARY KEY AUTOINCREMENT)
+  * `name` (TEXT)
+  * `hour` (INTEGER)
+  * `minute` (INTEGER)
+  * `isEnabled` (INTEGER)
+  * `repeatType` (TEXT)
+  * `daysOfWeek` (TEXT - comma-separated integers)
+  * `isVibrationEnabled` (INTEGER)
+  * `isSnoozeEnabled` (INTEGER)
+  * `snoozeDurationMinutes` (INTEGER)
+- `alarm_occurrences`:
+  * `id` (INTEGER PRIMARY KEY AUTOINCREMENT)
+  * `alarmId` (INTEGER, FOREIGN KEY REFERENCES alarms(id) ON DELETE CASCADE)
+  * `scheduledTimeMillis` (INTEGER)
+  * `status` (TEXT)
+  * `firedTimeMillis` (INTEGER NULLABLE)
+  * Index on `alarmId`.
+
+Schema V2 (Phase 1.1):
+- `confirmation_settings`:
+  * `id` (INTEGER PRIMARY KEY)
+  * `isEnabled` (INTEGER)
+  * `hour` (INTEGER)
+  * `minute` (INTEGER)
+- Migration: `MIGRATION_1_2` executes `CREATE TABLE IF NOT EXISTS confirmation_settings ...`
+  and seeds default row `(1, 0, 21, 0)`. Non-destructive and verified.
+
+Required Schema V3 (Phases 1.1 Fix, 2, 3, 4):
+- Add column `isConfirmationEnabled` (INTEGER DEFAULT 1) to `alarms`.
+- Add column `targetZoneId` (INTEGER NULLABLE) to `alarms`.
+- Add column `locationBehavior` (TEXT DEFAULT 'ANYWHERE') to `alarms`.
+- Add column `timeZoneId` (TEXT NULLABLE) to `alarms`.
+- Add column `timezonePolicy` (TEXT DEFAULT 'DEVICE_LOCAL') to `alarms`.
+- Create table `location_zones` (`id`, `name`, `latitude`, `longitude`, `radiusMeters`).
+- Create table `occurrence_overrides` (`occurrenceId`, `customTimeMillis`, `isSkipped`).
+
+================================================================================
+6. ANDROID MANIFEST, PERMISSIONS & PLAY STORE READINESS
+================================================================================
+
+Manifest Analysis (`/android/app/src/main/AndroidManifest.xml`):
+
+Current Declared Permissions:
+- `android.permission.RECEIVE_BOOT_COMPLETED` (Normal - Granted)
+- `android.permission.SCHEDULE_EXACT_ALARM` (Special App Access - API 31+)
+- `android.permission.USE_EXACT_ALARM` (Special Permission for Alarm Clocks - API 33+)
+- `android.permission.WAKE_LOCK` (Normal - Granted)
+- `android.permission.VIBRATE` (Normal - Granted)
+- `android.permission.POST_NOTIFICATIONS` (Runtime - API 33+)
+- `android.permission.USE_FULL_SCREEN_INTENT` (Special Permission - API 34+)
+
+Declared Components:
+- `MainActivity`: SingleTask, Exported, Action MAIN / Category LAUNCHER.
+- `AlarmRingingActivity`: SingleInstance, ExcludedFromRecents, ShowOnLockScreen,
+  TurnScreenOn, Not Exported.
+- `AlarmReceiver`: Not Exported.
+- `AlarmActionReceiver`: Not Exported.
+- `BootReceiver`: Exported = true with `BOOT_COMPLETED` & `MY_PACKAGE_REPLACED` filter.
+- `ConfirmationReceiver`: Not Exported.
+- `ConfirmationActionReceiver`: Not Exported.
+
+Missing Permissions & Components for Full Phases 2-4:
+- Missing Permissions:
+  * `android.permission.ACCESS_FINE_LOCATION`
+  * `android.permission.ACCESS_COARSE_LOCATION`
+  * `android.permission.ACCESS_BACKGROUND_LOCATION`
+- Missing Receivers:
+  * `TimezoneChangeReceiver` (listening to `android.intent.action.TIMEZONE_CHANGED`
+    and `android.intent.action.TIME_SET`).
+  * `GeofenceTransitionReceiver` (for background geofence events).
+
+Google Play Store Compliance Notes:
+- `USE_EXACT_ALARM` is declared, which is permitted by Google Play policy specifically
+  for Alarm Clock and Timer applications.
+- Target SDK is 35, Compile SDK is 35, Min SDK is 26 (Android 8.0 Oreo).
+- Meets modern 64-bit and Target SDK policy requirements.
+
+================================================================================
+7. BUILD SYSTEM, TOOLING & TEST SUITE STATUS
+================================================================================
+
+Gradle Configuration:
+- Gradle Version: 8.13.0 (Wrapper configured in `gradle-wrapper.properties`).
+- Android Gradle Plugin (AGP): 8.9.1.
+- Kotlin Version: 2.4.10.
+- Jetpack Compose BOM: 2026.08.00 (Compose UI 1.12.0).
+- Room Version: 2.8.4.
+- Java Target Compatibility: Java 17 / JVM 17.
+
+Test Suite Inventory:
+- `/test/com/smartalarm/app/domain/usecase/NextOccurrenceCalculatorTest.kt`:
+  * Tests one-time past vs. future triggers.
+  * Tests weekly repeat across next day, later in week, wrap-around next week,
+    and multiple active days.
+- `/test/com/smartalarm/app/domain/usecase/AlarmFireUseCaseTest.kt`:
+  * Tests fire transition, snooze behavior, and next occurrence rescheduling.
+- `/test/com/smartalarm/app/data/local/SmartAlarmDatabaseMigrationTest.kt`:
+  * Tests migration from v1 to v2 schema preserving existing alarm data.
+
+Build Environment Diagnostic:
+- Environment does not currently have `JAVA_HOME` export configured in the
+  interactive terminal shell, preventing direct command-line `gradlew test`
+  execution without specifying JDK 17 binary paths.
+- Static analysis confirms the Kotlin source code is syntactically sound and
+  matches Room 2.8.4 KSP and Compose 1.12.0 interfaces.
+
+================================================================================
+8. PRIORITIZED REMEDIATION & IMPLEMENTATION ROADMAP
+================================================================================
+
+P0: CRITICAL ARCHITECTURAL REPAIRS
+1. Refactor Confirmation Settings to Support Per-Alarm Configuration:
+   - Add `isConfirmationEnabled: Boolean = true` to `Alarm` domain model and `AlarmEntity`.
+   - Update `MIGRATION_2_3` in `SmartAlarmDatabase.kt` to add column to `alarms`.
+   - Update `GetTomorrowsConfirmableOccurrencesUseCase` to filter only alarms where
+     `isConfirmationEnabled == true`.
+   - Update `AlarmEditScreen` UI to add a per-alarm "Ask before ringing" toggle.
+
+P1: PHASE 2 COMPLETION (Rolling Occurrences & Overrides)
+1. Multi-Occurrence Window Generator:
+   - Implement `GenerateOccurrenceWindowUseCase` projecting occurrences 14 days forward.
+2. Individual Occurrence Mutation:
+   - Add use cases for editing, shifting, or skipping a single occurrence without
+     altering the parent repeating alarm rule.
+   - Update UI with an Agenda/Occurrence list view for upcoming alarm instances.
+
+P2: PHASE 3 IMPLEMENTATION (Location & Geofencing Engine)
+1. Location Data Layer:
+   - Create `LocationZone` entity and DAO.
+   - Add `locationZoneId` and `locationBehavior` (`RING_IF_PRESENT`, `SKIP_IF_PRESENT`)
+     to `AlarmEntity`.
+2. Geofencing Service:
+   - Integrate Android Location Services / Geofencing API.
+   - Add `GeofenceBroadcastReceiver` and update `AlarmFireUseCase` to query current
+     geofence state prior to ringing.
+3. UI Integration:
+   - Add Zone Manager screen and Zone Selector in `AlarmEditScreen`.
+
+P3: PHASE 4 IMPLEMENTATION (Timezone-Aware Alarms)
+1. Timezone Data & Rules:
+   - Add `timeZoneId` and `timezoneShiftPolicy` (`FIXED_LOCAL_TIME`, `FIXED_UTC_INSTANT`,
+     `ASK_USER`) to `AlarmEntity`.
+2. Timezone Broadcast Receiver:
+   - Implement `TimezoneChangeReceiver` in `AndroidManifest.xml`.
+   - Create `HandleTimezoneChangeUseCase` to evaluate active alarms on device timezone
+     change, reschedule AlarmManager events, and post an adjustment notification if needed.
+3. Timezone Adjustment UI:
+   - Add timezone conflict review screen when a timezone shift occurs.
+
+================================================================================
+END OF AUDIT REPORT
+================================================================================

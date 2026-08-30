@@ -23,7 +23,7 @@ import com.smartalarm.app.data.local.entity.ConfirmationSettingsEntity
  */
 @Database(
     entities = [AlarmEntity::class, AlarmOccurrenceEntity::class, ConfirmationSettingsEntity::class],
-    version = 2,
+    version = 3,
     exportSchema = true,
 )
 abstract class SmartAlarmDatabase : RoomDatabase() {
@@ -35,6 +35,6 @@ abstract class SmartAlarmDatabase : RoomDatabase() {
         const val DATABASE_NAME = "smart_alarm.db"
 
         /** Non-destructive migrations, in ascending order. */
-        val MIGRATIONS: Array<Migration> = arrayOf(MIGRATION_1_2)
+        val MIGRATIONS: Array<Migration> = arrayOf(MIGRATION_1_2, MIGRATION_2_3)
     }
 }

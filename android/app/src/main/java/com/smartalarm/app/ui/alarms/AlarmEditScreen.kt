@@ -6,9 +6,12 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
@@ -18,6 +21,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TimePicker
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.rememberTimePickerState
@@ -26,6 +30,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.smartalarm.app.domain.model.Alarm
@@ -37,9 +42,7 @@ private val DAY_SHORT_LABELS = mapOf(
 )
 
 /**
- * Create/edit form. Reference: the simulator's `CreateEditAlarmModal.tsx` (time picker, name,
- * repeat type, day-of-week toggles, vibration/snooze). Deliberately omits sound selection,
- * "ask before" behavior, location, and timezone fields - none of those are in Phase 1 scope.
+ * Material 3 Create/Edit alarm screen supporting per-alarm confirmation configuration.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -50,7 +53,7 @@ fun AlarmEditScreen(
     onCancel: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val timePickerState = rememberTimePickerState(
+    val alarmTimePickerState = rememberTimePickerState(
         initialHour = alarmToEdit?.hour ?: 7,
         initialMinute = alarmToEdit?.minute ?: 0,
         is24Hour = false,
@@ -61,6 +64,18 @@ fun AlarmEditScreen(
     var vibrationEnabled by remember { mutableStateOf(alarmToEdit?.isVibrationEnabled ?: true) }
     var snoozeEnabled by remember { mutableStateOf(alarmToEdit?.isSnoozeEnabled ?: true) }
     var snoozeMinutes by remember { mutableStateOf((alarmToEdit?.snoozeDurationMinutes ?: 9).toFloat()) }
+
+    var isConfirmationEnabled by remember { mutableStateOf(alarmToEdit?.isConfirmationEnabled ?: false) }
+    var confirmationHour by remember { mutableStateOf(alarmToEdit?.confirmationHour ?: 21) }
+    var confirmationMinute by remember { mutableStateOf(alarmToEdit?.confirmationMinute ?: 0) }
+    var showConfirmationPicker by remember { mutableStateOf(false) }
+
+    val confirmationTimePickerState = rememberTimePickerState(
+        initialHour = confirmationHour,
+        initialMinute = confirmationMinute,
+        is24Hour = false,
+    )
+
     var validationError by remember { mutableStateOf<String?>(null) }
 
     fun toggleDay(day: Int) {
@@ -82,68 +97,148 @@ fun AlarmEditScreen(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            TimePicker(state = timePickerState)
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp).fillMaxWidth(),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    TimePicker(state = alarmTimePickerState)
+                }
+            }
 
             OutlinedTextField(
                 value = name,
                 onValueChange = { name = it },
-                label = { Text("Name") },
+                label = { Text("Alarm name") },
                 modifier = Modifier.fillMaxWidth(),
             )
 
-            Text("Repeat", style = MaterialTheme.typography.labelLarge)
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                DAY_ORDER.forEach { day ->
-                    FilterChip(
-                        selected = day in selectedDays,
-                        onClick = { toggleDay(day) },
-                        label = { Text(DAY_SHORT_LABELS.getValue(day)) },
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+            ) {
+                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Repeat schedule", style = MaterialTheme.typography.labelLarge)
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        DAY_ORDER.forEach { day ->
+                            FilterChip(
+                                selected = day in selectedDays,
+                                onClick = { toggleDay(day) },
+                                label = { Text(DAY_SHORT_LABELS.getValue(day)) },
+                            )
+                        }
+                    }
+                    Text(
+                        text = if (repeatType == RepeatType.ONE_TIME) "Rings once" else "Rings weekly on selected days",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
             }
-            Text(
-                text = if (repeatType == RepeatType.ONE_TIME) "Rings once" else "Rings weekly on selected days",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
 
-            Row(
+            Card(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
             ) {
-                Text("Vibrate")
-                Switch(checked = vibrationEnabled, onCheckedChange = { vibrationEnabled = it })
+                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(modifier = Modifier.widthIn(max = 240.dp)) {
+                            Text("Ask before ringing", style = MaterialTheme.typography.titleMedium)
+                            Text(
+                                "Receive a notification the evening before to confirm or skip.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Switch(
+                            checked = isConfirmationEnabled,
+                            onCheckedChange = { isConfirmationEnabled = it },
+                        )
+                    }
+
+                    if (isConfirmationEnabled) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                text = "Confirmation time: " + formatAlarmTime(confirmationHour, confirmationMinute),
+                                style = MaterialTheme.typography.bodyMedium,
+                            )
+                            TextButton(onClick = { showConfirmationPicker = !showConfirmationPicker }) {
+                                Text(if (showConfirmationPicker) "Done" else "Change")
+                            }
+                        }
+
+                        if (showConfirmationPicker) {
+                            Column(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                            ) {
+                                TimePicker(state = confirmationTimePickerState)
+                                Button(
+                                    onClick = {
+                                        confirmationHour = confirmationTimePickerState.hour
+                                        confirmationMinute = confirmationTimePickerState.minute
+                                        showConfirmationPicker = false
+                                    },
+                                    modifier = Modifier.padding(top = 8.dp),
+                                ) {
+                                    Text("Set confirmation time")
+                                }
+                            }
+                        }
+                    }
+                }
             }
 
-            Row(
+            Card(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
             ) {
-                Text("Snooze")
-                Switch(checked = snoozeEnabled, onCheckedChange = { snoozeEnabled = it })
-            }
-            if (snoozeEnabled) {
-                Text("Snooze duration: ${snoozeMinutes.toInt()} min", style = MaterialTheme.typography.labelMedium)
-                Slider(
-                    value = snoozeMinutes,
-                    onValueChange = { snoozeMinutes = it },
-                    valueRange = 1f..30f,
-                    steps = 28,
-                )
+                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text("Vibrate", style = MaterialTheme.typography.titleMedium)
+                        Switch(checked = vibrationEnabled, onCheckedChange = { vibrationEnabled = it })
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text("Snooze", style = MaterialTheme.typography.titleMedium)
+                        Switch(checked = snoozeEnabled, onCheckedChange = { snoozeEnabled = it })
+                    }
+
+                    if (snoozeEnabled) {
+                        Text("Snooze duration: ${snoozeMinutes.toInt()} min", style = MaterialTheme.typography.labelMedium)
+                        Slider(
+                            value = snoozeMinutes,
+                            onValueChange = { snoozeMinutes = it },
+                            valueRange = 1f..30f,
+                            steps = 28,
+                        )
+                    }
+                }
             }
 
             validationError?.let {
                 Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
             }
 
-            // Modifier.weight(1f) (the idiomatic choice here) hits the same real Kotlin
-            // 2.4.10/Compose UI 1.12.0 "internal in file" compile failure documented in
-            // SmartAlarmNavHost.kt. fillMaxWidth(0.5f) + directional padding gives an identical
-            // precise 50/50 split with a 12dp gap without depending on RowScope.weight: each
-            // button measures against the Row's own full width (not "remaining space", since
-            // that reallocation is exactly what weight() alone provides), so both independently
-            // sizing to exactly half tile left-half/right-half with no overlap; the padding then
-            // insets each button's visible edge by 6dp, meeting in the middle for a 12dp gap.
             Row(modifier = Modifier.fillMaxWidth()) {
                 OutlinedButton(
                     onClick = onCancel,
@@ -157,17 +252,22 @@ fun AlarmEditScreen(
                             return@Button
                         }
                         validationError = null
+                        val effectiveConfHour = if (showConfirmationPicker) confirmationTimePickerState.hour else confirmationHour
+                        val effectiveConfMin = if (showConfirmationPicker) confirmationTimePickerState.minute else confirmationMinute
                         val alarm = Alarm(
                             id = alarmToEdit?.id ?: 0L,
                             name = name.ifBlank { "Alarm" },
-                            hour = timePickerState.hour,
-                            minute = timePickerState.minute,
+                            hour = alarmTimePickerState.hour,
+                            minute = alarmTimePickerState.minute,
                             isEnabled = alarmToEdit?.isEnabled ?: true,
                             repeatType = repeatType,
                             daysOfWeek = if (repeatType == RepeatType.WEEKLY) selectedDays else emptySet(),
                             isVibrationEnabled = vibrationEnabled,
                             isSnoozeEnabled = snoozeEnabled,
                             snoozeDurationMinutes = snoozeMinutes.toInt().coerceIn(1, 60),
+                            isConfirmationEnabled = isConfirmationEnabled,
+                            confirmationHour = effectiveConfHour,
+                            confirmationMinute = effectiveConfMin,
                         )
                         onSave(alarm)
                     },
@@ -183,3 +283,4 @@ fun AlarmEditScreen(
         }
     }
 }
+

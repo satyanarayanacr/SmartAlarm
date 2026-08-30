@@ -45,5 +45,6 @@ class ConfirmationReceiver : BroadcastReceiver() {
 
     companion object {
         const val ACTION_DAILY_CONFIRMATION = "com.smartalarm.app.action.DAILY_CONFIRMATION"
+        const val EXTRA_OCCURRENCE_ID = "com.smartalarm.app.extra.CONFIRMATION_OCCURRENCE_ID"
     }
 }

@@ -103,4 +103,24 @@ class GetTomorrowsConfirmableOccurrencesUseCaseTest {
 
         assertTrue(confirmable.isEmpty())
     }
+
+    @Test
+    fun `weekly alarm with confirmation disabled is excluded`() = runTest {
+        createUseCase.execute(
+            Alarm(
+                name = "Silent Wake Up",
+                hour = 7,
+                minute = 0,
+                repeatType = RepeatType.WEEKLY,
+                daysOfWeek = (1..7).toSet(),
+                isConfirmationEnabled = false,
+            ),
+            zone,
+            now,
+        )
+
+        val confirmable = getTomorrowsUseCase.execute(zone, confirmationFiresAt)
+
+        assertTrue(confirmable.isEmpty())
+    }
 }

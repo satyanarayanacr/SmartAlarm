@@ -14,10 +14,40 @@ import java.time.ZonedDateTime
 object ConfirmationTimeCalculator {
 
     /**
+     * Calculates the exact instant when the confirmation event should fire for an [occurrenceTimeMillis]
+     * given the [alarm]'s configured confirmation time ([alarm.confirmationHour], [alarm.confirmationMinute]).
+     *
+     * Rule:
+     * - If the confirmation time on the date of the occurrence is strictly before the occurrence time
+     *   (e.g., Alarm rings at 14:00, confirmation configured for 09:00 on the same day):
+     *   confirmation fires on the same day at 09:00.
+     * - If the confirmation time on the date of the occurrence is at or after the occurrence time
+     *   (e.g., Alarm rings at 07:00, confirmation configured for 21:00):
+     *   confirmation fires the day before the occurrence at 21:00.
+     */
+    fun confirmationTriggerForOccurrence(
+        alarm: Alarm,
+        occurrenceTimeMillis: Long,
+        zone: ZoneId,
+    ): Instant {
+        val occurrenceZdt = ZonedDateTime.ofInstant(Instant.ofEpochMilli(occurrenceTimeMillis), zone)
+        val sameDayConfirmation = occurrenceZdt
+            .withHour(alarm.confirmationHour)
+            .withMinute(alarm.confirmationMinute)
+            .withSecond(0)
+            .withNano(0)
+
+        val triggerZdt = if (sameDayConfirmation.isBefore(occurrenceZdt)) {
+            sameDayConfirmation
+        } else {
+            sameDayConfirmation.minusDays(1)
+        }
+        return triggerZdt.toInstant()
+    }
+
+    /**
      * The next instant, strictly after [fromInstant], that the daily confirmation should fire at
-     * [settings]'s configured local time. Always finds one (today if still ahead, else tomorrow) -
-     * unlike [OccurrenceCalculator.nextOccurrence] this never returns null, since the daily
-     * confirmation is not tied to a specific alarm that can run out of future occurrences.
+     * [settings]'s configured local time.
      */
     fun nextConfirmationTrigger(settings: ConfirmationSettings, fromInstant: Instant, zone: ZoneId): Instant {
         val from = ZonedDateTime.ofInstant(fromInstant, zone)
@@ -35,10 +65,7 @@ object ConfirmationTimeCalculator {
 
     /**
      * The [start, end) millis window for the calendar day immediately after [fromInstant]'s local
-     * date - i.e. "tomorrow" as of whenever the confirmation actually fires. Per the Phase 1.1
-     * spec ("today: Friday -> question: do you need Saturday's alarms"), this is always exactly
-     * one calendar day ahead in the device's current local clock context - no timezone-change
-     * handling (that remains Phase 3).
+     * date - i.e. "tomorrow" as of whenever the confirmation actually fires.
      */
     fun tomorrowRange(fromInstant: Instant, zone: ZoneId): MillisRange {
         val tomorrowStart = ZonedDateTime.ofInstant(fromInstant, zone)

@@ -2,19 +2,15 @@ package com.smartalarm.app.domain.usecase
 
 import com.smartalarm.app.data.repository.AlarmRepository
 import com.smartalarm.app.domain.ConfirmationTimeCalculator
+import com.smartalarm.app.domain.model.OccurrenceStatus
 import com.smartalarm.app.scheduler.ConfirmationScheduler
 import java.time.Instant
 import java.time.ZoneId
 
 /**
- * (Re)schedules Phase 1.1's single daily confirmation event from the current settings. Idempotent
- * and safe to call as often as needed (app open, boot recovery, after the confirmation itself
- * fires, whenever settings change) - [ConfirmationScheduler] always registers against the same
- * fixed request code, so calling this again simply replaces whatever was scheduled before rather
- * than creating a duplicate.
- *
- * If the feature is disabled, this cancels any existing scheduled event and schedules nothing -
- * satisfying "if disabled, no daily confirmation notifications should be scheduled".
+ * Reconciles confirmation schedules for all enabled alarms and their pending occurrences.
+ * For each enabled alarm with [isConfirmationEnabled] = true, schedules a confirmation
+ * trigger before its pending occurrence if the trigger is still in the future.
  */
 class ScheduleDailyConfirmationUseCase(
     private val repository: AlarmRepository,
@@ -24,12 +20,35 @@ class ScheduleDailyConfirmationUseCase(
         zone: ZoneId = ZoneId.systemDefault(),
         nowMillis: Long = System.currentTimeMillis(),
     ) {
-        val settings = repository.getConfirmationSettings()
-        if (!settings.isEnabled) {
-            confirmationScheduler.cancel()
-            return
+        val enabledAlarms = repository.getAllEnabledAlarms()
+        var scheduledAny = false
+
+        for (alarm in enabledAlarms) {
+            val pendingOccurrences = repository.getPendingOccurrencesForAlarm(alarm.id)
+            for (occurrence in pendingOccurrences) {
+                if (occurrence.status != OccurrenceStatus.SCHEDULED) continue
+
+                if (alarm.isConfirmationEnabled) {
+                    val triggerInstant = ConfirmationTimeCalculator.confirmationTriggerForOccurrence(
+                        alarm = alarm,
+                        occurrenceTimeMillis = occurrence.scheduledTimeMillis,
+                        zone = zone,
+                    )
+                    if (triggerInstant.isAfter(Instant.ofEpochMilli(nowMillis))) {
+                        confirmationScheduler.scheduleExact(occurrence.id, triggerInstant.toEpochMilli())
+                        scheduledAny = true
+                    } else {
+                        confirmationScheduler.cancel(occurrence.id)
+                    }
+                } else {
+                    confirmationScheduler.cancel(occurrence.id)
+                }
+            }
         }
-        val next = ConfirmationTimeCalculator.nextConfirmationTrigger(settings, Instant.ofEpochMilli(nowMillis), zone)
-        confirmationScheduler.scheduleExact(next.toEpochMilli())
+
+        if (!scheduledAny) {
+            confirmationScheduler.cancelAll()
+        }
     }
 }
+

@@ -127,12 +127,12 @@ export interface Alarm {
   daysOfWeek: number[]; // 1=Mon, 2=Tue, 3=Wed, 4=Thu, 5=Fri, 6=Sat, 7=Sun (or empty for one-time)
   behavior: AlarmBehavior; // 'ALWAYS', 'ASK_BEFORE', or 'LOCATION_AWARE'
   
-  // Phase 4: Timezone attributes
-  timezoneBehavior: TimezoneBehavior; // 'LOCAL_TIME' (default) or 'ORIGINAL_TIMEZONE'
-  originalTimezoneId: string; // IANA ID where alarm was created (e.g. "Asia/Kolkata")
-  originalLocalHour: number; // Hour in original timezone
-  originalLocalMinute: number; // Minute in original timezone
-  currentTimezoneId: string; // Last active timezone ID
+  // Phase 4: Timezone attributes (optional for backwards compatibility)
+  timezoneBehavior?: TimezoneBehavior; // 'LOCAL_TIME' (default) or 'ORIGINAL_TIMEZONE'
+  originalTimezoneId?: string; // IANA ID where alarm was created (e.g. "Asia/Kolkata")
+  originalLocalHour?: number; // Hour in original timezone
+  originalLocalMinute?: number; // Minute in original timezone
+  currentTimezoneId?: string; // Last active timezone ID
   
   locationZoneId?: string | null; // null/undefined or 'anywhere' = Anywhere
   locationCondition?: LocationCondition; // 'WHEN_INSIDE' (default) or 'WHEN_OUTSIDE'
@@ -158,10 +158,10 @@ export interface AlarmOccurrence {
   status: OccurrenceStatus;
   confirmationStatus: OccurrenceConfirmationStatus;
   
-  // Phase 4: Timezone attributes on occurrence level
-  timezoneId: string; // IANA ZoneId for this occurrence
-  timezoneBehavior: TimezoneBehavior;
-  originalTimezoneId: string;
+  // Phase 4: Timezone attributes on occurrence level (optional for backwards compatibility)
+  timezoneId?: string; // IANA ZoneId for this occurrence
+  timezoneBehavior?: TimezoneBehavior;
+  originalTimezoneId?: string;
   displayedLocalHour?: number;
   displayedLocalMinute?: number;
   

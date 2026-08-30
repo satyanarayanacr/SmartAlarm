@@ -18,6 +18,7 @@ class CreateOrUpdateAlarmUseCaseTest {
 
     private lateinit var repository: FakeAlarmRepository
     private lateinit var scheduler: FakeAlarmScheduler
+    private lateinit var confirmationScheduler: com.smartalarm.app.fakes.FakeConfirmationScheduler
     private lateinit var useCase: CreateOrUpdateAlarmUseCase
     private val zone = ZoneId.of("Asia/Kolkata")
     private val now = ZonedDateTime.of(2026, 9, 2, 8, 0, 0, 0, zone).toInstant().toEpochMilli()
@@ -26,7 +27,11 @@ class CreateOrUpdateAlarmUseCaseTest {
     fun setUp() {
         repository = FakeAlarmRepository()
         scheduler = FakeAlarmScheduler()
-        useCase = CreateOrUpdateAlarmUseCase(repository, AlarmSchedulingCoordinator(repository, scheduler))
+        confirmationScheduler = com.smartalarm.app.fakes.FakeConfirmationScheduler()
+        useCase = CreateOrUpdateAlarmUseCase(
+            repository,
+            AlarmSchedulingCoordinator(repository, scheduler, confirmationScheduler),
+        )
     }
 
     @Test
@@ -37,6 +42,25 @@ class CreateOrUpdateAlarmUseCaseTest {
         assertTrue(saved.id != 0L)
         assertEquals(1, scheduler.activeCount())
         assertEquals(1, repository.allOccurrences().count { it.status == OccurrenceStatus.SCHEDULED })
+    }
+
+    @Test
+    fun `creating alarm with confirmation enabled schedules confirmation for tomorrow occurrence`() = runTest {
+        val alarm = Alarm(
+            name = "Wake up",
+            hour = 9,
+            minute = 0,
+            repeatType = RepeatType.WEEKLY,
+            daysOfWeek = setOf(4), // Thursday (tomorrow relative to Wed Sep 2)
+            isConfirmationEnabled = true,
+            confirmationHour = 21,
+            confirmationMinute = 0,
+        )
+        val saved = useCase.execute(alarm, zone, now)
+
+        assertTrue(saved.id != 0L)
+        assertEquals(1, scheduler.activeCount())
+        assertEquals(1, confirmationScheduler.scheduledOccurrences.size)
     }
 
     @Test

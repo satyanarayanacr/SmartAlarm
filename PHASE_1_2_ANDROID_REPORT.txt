@@ -1,0 +1,82 @@
+================================================================================
+SMART ALARM — PHASE 1.2 IMPLEMENTATION REPORT
+Per-Alarm Confirmation + Scheduling Reconciliation + Material 3 UI Redesign
+================================================================================
+
+1. EXECUTIVE SUMMARY
+--------------------------------------------------------------------------------
+Phase 1.2 successfully migrates the confirmation model from a global singleton
+to an individual, per-alarm configuration. Every alarm can now independently
+enable or disable night-before confirmation and specify its own confirmation
+trigger time (e.g. 9:00 PM the evening before the alarm occurrence).
+
+All changes follow non-destructive database migration standards, clean architecture
+principles, per-occurrence AlarmManager scheduling, and Material 3 design patterns.
+
+2. ARCHITECTURAL & DATA MODEL CHANGES
+--------------------------------------------------------------------------------
+- Domain Model (Alarm.kt):
+  * Added `isConfirmationEnabled: Boolean = true`
+  * Added `confirmationHour: Int = 21` (9:00 PM default)
+  * Added `confirmationMinute: Int = 0`
+
+- Database & Room Migration (AlarmEntity.kt, AppDatabase.kt):
+  * Added `is_confirmation_enabled`, `confirmation_hour`, `confirmation_minute`
+    columns with default values (1, 21, 0).
+  * Database version bumped to 3 with `MIGRATION_2_3`:
+    - `ALTER TABLE alarms ADD COLUMN is_confirmation_enabled INTEGER NOT NULL DEFAULT 1`
+    - `ALTER TABLE alarms ADD COLUMN confirmation_hour INTEGER NOT NULL DEFAULT 21`
+    - `ALTER TABLE alarms ADD COLUMN confirmation_minute INTEGER NOT NULL DEFAULT 0`
+  * Non-destructive migration preserves all existing user alarms.
+
+- Time Calculation (ConfirmationTimeCalculator.kt):
+  * Added `confirmationTriggerForOccurrence(alarm, occurrenceScheduledMillis, zoneId)`:
+    Calculates the exact evening-before trigger instant for a specific scheduled occurrence.
+
+3. SCHEDULER & COORDINATOR REFACTOR
+--------------------------------------------------------------------------------
+- ConfirmationScheduler & AndroidConfirmationScheduler:
+  * Transitioned from global singleton scheduling to per-occurrence scheduling:
+    - `scheduleExact(occurrenceId: Long, triggerAtMillis: Long)`
+    - `cancel(occurrenceId: Long)`
+    - `cancelAll()`
+  * Unique `PendingIntent` request codes derived from `occurrenceId` to prevent
+    collision between multiple alarm confirmations.
+
+- AlarmSchedulingCoordinator:
+  * Integrated `ConfirmationScheduler` into the coordinator lifecycle:
+    - When scheduling or rearming an occurrence: automatically computes and
+      schedules its confirmation event if `isConfirmationEnabled` is true and
+      the trigger time is in the future.
+    - When cancelling an occurrence: automatically cancels any associated
+      pending confirmation event.
+
+- Use Cases:
+  * `ScheduleDailyConfirmationUseCase`: Reconciles confirmation schedules across all
+    enabled alarms and their pending occurrences.
+  * `GetTomorrowsConfirmableOccurrencesUseCase`: Filters candidates by
+    `alarm.isConfirmationEnabled` in addition to occurrence time and repeat type.
+  * `ConfirmationReceiver`: Supports `EXTRA_OCCURRENCE_ID` for targeted intent routing.
+
+4. MATERIAL 3 UI REDESIGN
+--------------------------------------------------------------------------------
+- AlarmEditScreen.kt:
+  * Rebuilt using Material 3 Card containers, surface hierarchy, and typography.
+  * Added "Ask before ringing" switch and expandable Material 3 TimePicker
+    for per-alarm confirmation timing.
+  * Preserved compose compatibility (avoiding unsupported modifier weight declarations).
+  * Full support for saving and editing individual alarm confirmation parameters.
+
+- AlarmListScreen.kt:
+  * Enhanced alarm cards to display confirmation status badge/chip
+    (e.g., "Confirms at 9:00 PM night before").
+
+5. UNIT & RECONCILIATION TEST SUITE
+--------------------------------------------------------------------------------
+- Updated FakeConfirmationScheduler with per-occurrence tracking.
+- Added tests in `ConfirmationTimeCalculatorTest.kt` verifying exact previous-day calculation.
+- Added tests in `ScheduleDailyConfirmationUseCaseTest.kt` verifying per-alarm scheduling,
+  cancellation on toggle, idempotency, and time updates.
+- Added tests in `CreateOrUpdateAlarmUseCaseTest.kt` for coordinator confirmation scheduling.
+- Added tests in `GetTomorrowsConfirmableOccurrencesUseCaseTest.kt` for filtering disabled alarms.
+================================================================================

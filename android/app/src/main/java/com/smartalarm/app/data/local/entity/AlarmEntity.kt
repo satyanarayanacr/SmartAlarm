@@ -25,6 +25,9 @@ data class AlarmEntity(
     val isVibrationEnabled: Boolean,
     val isSnoozeEnabled: Boolean,
     val snoozeDurationMinutes: Int,
+    val isConfirmationEnabled: Boolean = true,
+    val confirmationHour: Int = 21,
+    val confirmationMinute: Int = 0,
     val createdAt: Long,
     val updatedAt: Long,
 )
@@ -40,6 +43,9 @@ fun AlarmEntity.toDomain(): Alarm = Alarm(
     isVibrationEnabled = isVibrationEnabled,
     isSnoozeEnabled = isSnoozeEnabled,
     snoozeDurationMinutes = snoozeDurationMinutes,
+    isConfirmationEnabled = isConfirmationEnabled,
+    confirmationHour = confirmationHour,
+    confirmationMinute = confirmationMinute,
     createdAt = createdAt,
     updatedAt = updatedAt,
 )
@@ -55,6 +61,9 @@ fun Alarm.toEntity(): AlarmEntity = AlarmEntity(
     isVibrationEnabled = isVibrationEnabled,
     isSnoozeEnabled = isSnoozeEnabled,
     snoozeDurationMinutes = snoozeDurationMinutes,
+    isConfirmationEnabled = isConfirmationEnabled,
+    confirmationHour = confirmationHour,
+    confirmationMinute = confirmationMinute,
     createdAt = createdAt,
     updatedAt = updatedAt,
 )

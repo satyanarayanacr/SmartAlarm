@@ -21,12 +21,17 @@ data class Alarm(
     val isVibrationEnabled: Boolean = true,
     val isSnoozeEnabled: Boolean = true,
     val snoozeDurationMinutes: Int = 9,
+    val isConfirmationEnabled: Boolean = true,
+    val confirmationHour: Int = 21,
+    val confirmationMinute: Int = 0,
     val createdAt: Long = 0L,
     val updatedAt: Long = 0L,
 ) {
     init {
         require(hour in 0..23) { "hour must be in 0..23, was $hour" }
         require(minute in 0..59) { "minute must be in 0..59, was $minute" }
+        require(confirmationHour in 0..23) { "confirmationHour must be in 0..23, was $confirmationHour" }
+        require(confirmationMinute in 0..59) { "confirmationMinute must be in 0..59, was $confirmationMinute" }
         require(snoozeDurationMinutes in 1..60) {
             "snoozeDurationMinutes must be in 1..60, was $snoozeDurationMinutes"
         }

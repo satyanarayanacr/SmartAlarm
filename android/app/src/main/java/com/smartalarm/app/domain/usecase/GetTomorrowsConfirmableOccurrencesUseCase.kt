@@ -32,6 +32,7 @@ class GetTomorrowsConfirmableOccurrencesUseCase(
 
         return tomorrowsOccurrences.mapNotNull { occurrence ->
             val alarm = repository.getAlarm(occurrence.alarmId) ?: return@mapNotNull null
+            if (!alarm.isEnabled || !alarm.isConfirmationEnabled) return@mapNotNull null
             if (alarm.repeatType != RepeatType.WEEKLY) return@mapNotNull null
             ConfirmableOccurrence(alarm, occurrence)
         }

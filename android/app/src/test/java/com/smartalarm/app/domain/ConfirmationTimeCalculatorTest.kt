@@ -70,4 +70,25 @@ class ConfirmationTimeCalculatorTest {
         assertEquals(expectedStart, range.startMillis)
         assertEquals(expectedEnd, range.endMillis)
     }
+
+    @Test
+    fun `per-alarm confirmationTriggerForOccurrence schedules on the previous calendar day`() {
+        val alarm = com.smartalarm.app.domain.model.Alarm(
+            id = 1L,
+            name = "Work",
+            hour = 7,
+            minute = 0,
+            isConfirmationEnabled = true,
+            confirmationHour = 20,
+            confirmationMinute = 30,
+        )
+        // Alarm occurrence is on Thursday Sep 3 at 7:00 AM
+        val occurrenceMillis = ZonedDateTime.of(2026, 9, 3, 7, 0, 0, 0, zone).toInstant().toEpochMilli()
+
+        val trigger = ConfirmationTimeCalculator.confirmationTriggerForOccurrence(alarm, occurrenceMillis, zone)
+
+        // Expected confirmation is Wednesday Sep 2 at 20:30 (8:30 PM)
+        val expectedTrigger = ZonedDateTime.of(2026, 9, 2, 20, 30, 0, 0, zone).toInstant()
+        assertEquals(expectedTrigger, trigger)
+    }
 }

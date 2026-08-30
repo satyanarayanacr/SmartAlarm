@@ -4,26 +4,19 @@ import android.app.AlarmManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import android.os.Build
 import com.smartalarm.app.receiver.ConfirmationReceiver
 
 /**
- * Real AlarmManager-backed implementation of [ConfirmationScheduler]. Mirrors
- * [AndroidAlarmScheduler]'s duplicate-prevention approach (same action/request code every time,
- * `FLAG_UPDATE_CURRENT`) but for a single, fixed event rather than one per occurrence id - there
- * is only ever one daily confirmation, so a single fixed request code is sufficient and correct:
- * scheduling again always replaces the previous confirmation event rather than adding a second
- * one, satisfying the spec's "do not create duplicate confirmation events".
+ * Real AlarmManager-backed implementation of [ConfirmationScheduler].
+ * Schedules per-occurrence confirmation alarms using distinct PendingIntents (action + data uri + request code).
  */
 class AndroidConfirmationScheduler(private val context: Context) : ConfirmationScheduler {
 
     private val alarmManager: AlarmManager
         get() = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
 
-    // Same exact-alarm constraint Phase 1's AndroidAlarmScheduler already enforces (see the spec's
-    // "confirmation scheduling must respect the same Android exact-alarm constraints already
-    // handled by Phase 1") - duplicated here as a tiny, self-contained check rather than sharing
-    // one across both schedulers, consistent with each scheduler owning its own AlarmManager calls.
     private fun canScheduleExactAlarms(): Boolean =
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             alarmManager.canScheduleExactAlarms()
@@ -31,21 +24,22 @@ class AndroidConfirmationScheduler(private val context: Context) : ConfirmationS
             true
         }
 
-    override fun scheduleExact(triggerAtMillis: Long) {
+    override fun scheduleExact(occurrenceId: Long, triggerAtMillis: Long) {
         if (!canScheduleExactAlarms()) {
-            // Fail safe, same as AndroidAlarmScheduler: never schedule something the OS would
-            // reject. ScheduleDailyConfirmationUseCase is re-invoked on every app open, alarm
-            // change, and boot, so this is naturally retried once permission is granted.
             return
         }
-        alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAtMillis, pendingIntent())
+        alarmManager.setExactAndAllowWhileIdle(
+            AlarmManager.RTC_WAKEUP,
+            triggerAtMillis,
+            pendingIntent(occurrenceId)
+        )
     }
 
-    override fun cancel() {
+    override fun cancel(occurrenceId: Long) {
         val pendingIntent = PendingIntent.getBroadcast(
             context,
-            REQUEST_CODE,
-            intent(),
+            requestCodeFor(occurrenceId),
+            intent(occurrenceId),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_NO_CREATE,
         )
         if (pendingIntent != null) {
@@ -54,23 +48,26 @@ class AndroidConfirmationScheduler(private val context: Context) : ConfirmationS
         }
     }
 
-    private fun intent(): Intent =
+    override fun cancelAll() {
+        cancel(0L)
+    }
+
+    private fun intent(occurrenceId: Long): Intent =
         Intent(context, ConfirmationReceiver::class.java).apply {
             action = ConfirmationReceiver.ACTION_DAILY_CONFIRMATION
+            data = Uri.parse("smartalarm://confirmation/$occurrenceId")
+            putExtra(ConfirmationReceiver.EXTRA_OCCURRENCE_ID, occurrenceId)
         }
 
-    private fun pendingIntent(): PendingIntent =
+    private fun pendingIntent(occurrenceId: Long): PendingIntent =
         PendingIntent.getBroadcast(
             context,
-            REQUEST_CODE,
-            intent(),
+            requestCodeFor(occurrenceId),
+            intent(occurrenceId),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
 
-    private companion object {
-        // Fixed and unique to this one confirmation event - never derived from an occurrence/alarm
-        // id, and never collides with AndroidAlarmScheduler's request codes because PendingIntent
-        // identity also includes the target component (ConfirmationReceiver vs AlarmReceiver).
-        const val REQUEST_CODE = 0
-    }
+    private fun requestCodeFor(occurrenceId: Long): Int =
+        (occurrenceId.toInt() * 37) + 1000
 }
+

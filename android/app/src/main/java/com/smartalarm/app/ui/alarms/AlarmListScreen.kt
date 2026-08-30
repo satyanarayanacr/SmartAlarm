@@ -136,6 +136,13 @@ private fun AlarmCard(
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.primary,
                     )
+                    if (alarm.isConfirmationEnabled) {
+                        Text(
+                            text = "Confirms at " + formatAlarmTime(alarm.confirmationHour, alarm.confirmationMinute) + " night before",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.secondary,
+                        )
+                    }
                     if (alarm.isEnabled && nextOccurrence != null) {
                         Text(
                             text = "Next: " + formatDateTime(nextOccurrence.scheduledTimeMillis),

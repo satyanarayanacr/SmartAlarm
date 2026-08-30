@@ -5,24 +5,25 @@ import com.smartalarm.app.domain.model.Alarm
 import com.smartalarm.app.domain.model.AlarmOccurrence
 import com.smartalarm.app.domain.model.OccurrenceStatus
 import com.smartalarm.app.scheduler.AlarmScheduler
+import com.smartalarm.app.scheduler.ConfirmationScheduler
 import java.time.Instant
 import java.time.ZoneId
 
 /**
- * Shared scheduling logic used by every UseCase that can create, cancel, or re-arm an occurrence.
- * Centralizing this here (rather than duplicating it in each UseCase) is what guarantees the
- * duplicate-prevention rules stay consistent everywhere: create/edit, enable/disable, delete,
- * alarm-fire (weekly rollover), and boot recovery all go through the exact same two operations.
+ * Shared scheduling logic used by every UseCase that can create, cancel, or re-arm an occurrence
+ * and its associated confirmation event.
  */
 class AlarmSchedulingCoordinator(
     private val repository: AlarmRepository,
     private val scheduler: AlarmScheduler,
+    private val confirmationScheduler: ConfirmationScheduler? = null,
 ) {
-    /** Cancels the OS alarm and marks CANCELLED every currently-pending (SCHEDULED/SNOOZED) occurrence of [alarmId]. */
+    /** Cancels the OS alarm and confirmation, and marks CANCELLED every currently-pending occurrence of [alarmId]. */
     suspend fun cancelAllScheduled(alarmId: Long, nowMillis: Long = System.currentTimeMillis()) {
         val pending = repository.getPendingOccurrencesForAlarm(alarmId)
         for (occurrence in pending) {
             scheduler.cancel(occurrence.id)
+            confirmationScheduler?.cancel(occurrence.id)
             repository.saveOccurrence(
                 occurrence.copy(status = OccurrenceStatus.CANCELLED, updatedAt = nowMillis)
             )
@@ -30,17 +31,8 @@ class AlarmSchedulingCoordinator(
     }
 
     /**
-     * Computes and persists the next occurrence for [alarm] (if any - null when disabled, or when
-     * occurrence math finds nothing), and schedules it with AlarmManager. Returns the saved
-     * occurrence, or null if none was scheduled.
-     *
-     * @param fromInstant The instant occurrence math searches strictly after. Defaults to
-     *   `nowMillis` (the normal "what's next as of right now" case used by create/edit/toggle/
-     *   boot-recovery). [SkipOccurrenceUseCase][com.smartalarm.app.domain.usecase.SkipOccurrenceUseCase]
-     *   passes the *skipped* occurrence's own scheduled time instead: Phase 1.1's daily
-     *   confirmation runs well before the occurrence it's asking about (e.g. 9pm the evening
-     *   before a 7am alarm), so searching "from now" would find that same still-in-the-future
-     *   occurrence again rather than skipping past it to the day after.
+     * Computes and persists the next occurrence for [alarm], schedules it with AlarmManager,
+     * and schedules its confirmation event if confirmation is enabled.
      */
     suspend fun scheduleNextOccurrence(
         alarm: Alarm,
@@ -63,6 +55,22 @@ class AlarmSchedulingCoordinator(
         val id = repository.saveOccurrence(occurrence)
         val saved = occurrence.copy(id = id)
         scheduler.scheduleExact(id, alarm, saved.scheduledTimeMillis)
+
+        if (alarm.isEnabled && alarm.isConfirmationEnabled && confirmationScheduler != null) {
+            val triggerInstant = ConfirmationTimeCalculator.confirmationTriggerForOccurrence(
+                alarm = alarm,
+                occurrenceTimeMillis = saved.scheduledTimeMillis,
+                zone = zone,
+            )
+            if (triggerInstant.isAfter(Instant.ofEpochMilli(nowMillis))) {
+                confirmationScheduler.scheduleExact(saved.id, triggerInstant.toEpochMilli())
+            } else {
+                confirmationScheduler.cancel(saved.id)
+            }
+        } else {
+            confirmationScheduler?.cancel(saved.id)
+        }
+
         return saved
     }
 
@@ -78,24 +86,36 @@ class AlarmSchedulingCoordinator(
     }
 
     /**
-     * Re-registers an already-persisted, still-future occurrence with AlarmManager using its
-     * existing id (so the request code matches exactly what was cancelled-on-reboot). Used only
-     * by boot recovery - Room survives a reboot, AlarmManager's in-memory alarms do not.
+     * Re-registers an already-persisted, still-future occurrence with AlarmManager and ConfirmationScheduler.
      */
-    fun rearmExisting(occurrence: AlarmOccurrence, alarm: Alarm) {
+    fun rearmExisting(
+        occurrence: AlarmOccurrence,
+        alarm: Alarm,
+        zone: ZoneId = ZoneId.systemDefault(),
+        nowMillis: Long = System.currentTimeMillis(),
+    ) {
         scheduler.scheduleExact(occurrence.id, alarm, occurrence.scheduledTimeMillis)
+        if (alarm.isEnabled && alarm.isConfirmationEnabled && confirmationScheduler != null) {
+            val triggerInstant = ConfirmationTimeCalculator.confirmationTriggerForOccurrence(
+                alarm = alarm,
+                occurrenceTimeMillis = occurrence.scheduledTimeMillis,
+                zone = zone,
+            )
+            if (triggerInstant.isAfter(Instant.ofEpochMilli(nowMillis))) {
+                confirmationScheduler.scheduleExact(occurrence.id, triggerInstant.toEpochMilli())
+            } else {
+                confirmationScheduler.cancel(occurrence.id)
+            }
+        } else {
+            confirmationScheduler?.cancel(occurrence.id)
+        }
     }
 
     /**
-     * Removes [occurrenceId]'s entry from AlarmManager without touching its Room row's status.
-     * Used by [AlarmFireUseCase][com.smartalarm.app.domain.usecase.AlarmFireUseCase] right after
-     * an occurrence fires: the occurrence's own status transition (FIRED) is the repository's
-     * concern, but AlarmManager's bookkeeping for that specific occurrence id must also be
-     * cleared so it never reads as still "active" - a real device's AlarmManager auto-consumes a
-     * one-shot exact alarm the instant it fires, and this keeps our own scheduler abstraction
-     * consistent with that.
+     * Removes [occurrenceId]'s entry from AlarmManager and ConfirmationScheduler without touching Room row.
      */
     fun cancelScheduledEntry(occurrenceId: Long) {
         scheduler.cancel(occurrenceId)
+        confirmationScheduler?.cancel(occurrenceId)
     }
 }

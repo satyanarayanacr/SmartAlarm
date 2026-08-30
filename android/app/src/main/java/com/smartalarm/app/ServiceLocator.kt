@@ -49,7 +49,7 @@ class ServiceLocator(context: Context) {
     val confirmationScheduler: ConfirmationScheduler by lazy { AndroidConfirmationScheduler(appContext) }
 
     private val coordinator: AlarmSchedulingCoordinator by lazy {
-        AlarmSchedulingCoordinator(repository, scheduler)
+        AlarmSchedulingCoordinator(repository, scheduler, confirmationScheduler)
     }
 
     val createOrUpdateAlarmUseCase: CreateOrUpdateAlarmUseCase by lazy {
