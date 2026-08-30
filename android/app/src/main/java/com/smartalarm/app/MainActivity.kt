@@ -46,9 +46,28 @@ class MainActivity : ComponentActivity() {
         ActivityResultContracts.RequestPermission()
     ) { /* No further action needed: the system remembers the user's choice. */ }
 
+    // A plain (non-Compose-scoped) MutableState so it survives across onNewIntent calls without
+    // needing a ViewModel just for this: incremented every time a "review tomorrow's alarms"
+    // intent arrives (both the initial launch intent and any later onNewIntent), so
+    // SmartAlarmNavHost's LaunchedEffect(reviewRequestId) can react even if the user taps the
+    // confirmation notification again while already on some other screen.
+    private val reviewRequestId = mutableStateOf(0)
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        if (intent.action == ACTION_REVIEW_TOMORROWS_ALARMS) {
+            reviewRequestId.value += 1
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+
+        if (intent?.action == ACTION_REVIEW_TOMORROWS_ALARMS) {
+            reviewRequestId.value += 1
+        }
 
         val locator = (application as SmartAlarmApplication).serviceLocator
 
@@ -96,11 +115,20 @@ class MainActivity : ComponentActivity() {
                                 },
                             )
                         }
-                        SmartAlarmNavHost(locator = locator, isWideLayout = isWideLayout)
+                        SmartAlarmNavHost(
+                            locator = locator,
+                            isWideLayout = isWideLayout,
+                            reviewRequestId = reviewRequestId.value,
+                        )
                     }
                 }
             }
         }
+    }
+
+    companion object {
+        /** Sent by the daily confirmation notification's REVIEW action / content tap. */
+        const val ACTION_REVIEW_TOMORROWS_ALARMS = "com.smartalarm.app.action.REVIEW_TOMORROWS_ALARMS"
     }
 }
 

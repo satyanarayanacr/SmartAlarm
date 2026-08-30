@@ -47,11 +47,17 @@ fun AlarmListScreen(
     onEditAlarm: (Alarm) -> Unit,
     onToggleAlarm: (Long, Boolean) -> Unit,
     onDeleteAlarm: (Alarm) -> Unit,
+    onOpenSettings: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Scaffold(
         modifier = modifier,
-        topBar = { TopAppBar(title = { Text("Smart Alarm") }) },
+        topBar = {
+            TopAppBar(
+                title = { Text("Smart Alarm") },
+                actions = { TextButton(onClick = onOpenSettings) { Text("Settings") } },
+            )
+        },
         floatingActionButton = {
             FloatingActionButton(onClick = onAddAlarm) { Text("+", style = MaterialTheme.typography.headlineSmall) }
         },

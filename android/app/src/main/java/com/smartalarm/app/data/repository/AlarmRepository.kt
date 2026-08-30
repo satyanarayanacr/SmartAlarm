@@ -2,6 +2,7 @@ package com.smartalarm.app.data.repository
 
 import com.smartalarm.app.domain.model.Alarm
 import com.smartalarm.app.domain.model.AlarmOccurrence
+import com.smartalarm.app.domain.model.ConfirmationSettings
 import kotlinx.coroutines.flow.Flow
 
 /**
@@ -31,4 +32,19 @@ interface AlarmRepository {
 
     /** Inserts a new occurrence and returns its assigned id, or updates an existing one (id != 0). */
     suspend fun saveOccurrence(occurrence: AlarmOccurrence): Long
+
+    /** Occurrences still SCHEDULED whose scheduled time falls in [startMillis, endMillis). */
+    suspend fun getScheduledOccurrencesBetween(startMillis: Long, endMillis: Long): List<AlarmOccurrence>
+
+    /** Phase 1.1: the global daily-confirmation preference. See [ConfirmationSettings]. */
+    fun observeConfirmationSettings(): Flow<ConfirmationSettings>
+
+    /**
+     * Returns the current settings, creating and persisting the shipped defaults first if none
+     * exist yet (a fresh install past Phase 1.1, or - defensively - a Phase 1 install upgraded
+     * without going through [com.smartalarm.app.data.local.MIGRATION_1_2] for some reason).
+     */
+    suspend fun getConfirmationSettings(): ConfirmationSettings
+
+    suspend fun saveConfirmationSettings(settings: ConfirmationSettings)
 }

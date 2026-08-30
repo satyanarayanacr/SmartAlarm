@@ -33,13 +33,22 @@ class AlarmSchedulingCoordinator(
      * Computes and persists the next occurrence for [alarm] (if any - null when disabled, or when
      * occurrence math finds nothing), and schedules it with AlarmManager. Returns the saved
      * occurrence, or null if none was scheduled.
+     *
+     * @param fromInstant The instant occurrence math searches strictly after. Defaults to
+     *   `nowMillis` (the normal "what's next as of right now" case used by create/edit/toggle/
+     *   boot-recovery). [SkipOccurrenceUseCase][com.smartalarm.app.domain.usecase.SkipOccurrenceUseCase]
+     *   passes the *skipped* occurrence's own scheduled time instead: Phase 1.1's daily
+     *   confirmation runs well before the occurrence it's asking about (e.g. 9pm the evening
+     *   before a 7am alarm), so searching "from now" would find that same still-in-the-future
+     *   occurrence again rather than skipping past it to the day after.
      */
     suspend fun scheduleNextOccurrence(
         alarm: Alarm,
         zone: ZoneId = ZoneId.systemDefault(),
         nowMillis: Long = System.currentTimeMillis(),
+        fromInstant: Instant = Instant.ofEpochMilli(nowMillis),
     ): AlarmOccurrence? {
-        val nextInstant = OccurrenceCalculator.nextOccurrence(alarm, Instant.ofEpochMilli(nowMillis), zone)
+        val nextInstant = OccurrenceCalculator.nextOccurrence(alarm, fromInstant, zone)
             ?: return null
 
         val occurrence = AlarmOccurrence(

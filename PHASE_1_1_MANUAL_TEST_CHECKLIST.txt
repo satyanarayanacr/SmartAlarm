@@ -1,0 +1,99 @@
+SMART ALARM - PHASE 1.1 - MANUAL TEST CHECKLIST
+To be run by you, on a real device, and checked off by you.
+I have not run any of these and am not claiming any of them pass - only
+what is described as verified in PHASE_1_1_ANDROID_REPORT.txt (which, at
+the time this checklist was written, is nothing yet - no real build has
+happened for Phase 1.1).
+
+Before starting, make sure Phase 1's existing manual tests
+(PHASE_1_MANUAL_TEST_CHECKLIST.txt) still pass - Phase 1.1 must not have
+broken any of that.
+
+[ ] A. Open Settings from the alarm list. Confirm "Daily alarm
+       confirmation" appears, defaults to enabled, with a default
+       confirmation time of 9:00 PM.
+
+[ ] B. Change the confirmation time (e.g. to a couple of minutes from
+       now, for testing) and leave the screen. Re-open Settings and
+       confirm the new time is still shown (persisted).
+
+[ ] C. Create at least one WEEKLY alarm that includes tomorrow's day of
+       the week. Also create a ONE_TIME alarm for some time tomorrow.
+
+[ ] D. Set the confirmation time to a couple of minutes in the future
+       and wait for it. Confirm a "Tomorrow's alarms" notification
+       appears, and that its count reflects only the WEEKLY alarm(s),
+       not the ONE_TIME alarm.
+
+[ ] E. Tap "Keep All" on that notification. Confirm the notification is
+       dismissed and every alarm still rings normally at its scheduled
+       time tomorrow (nothing was changed).
+
+[ ] F. Trigger the confirmation again (next day or by resetting the
+       time). Tap "Review" this time. Confirm the app opens directly to
+       a review screen listing tomorrow's WEEKLY alarms, each with a
+       checkbox, all checked by default.
+
+[ ] G. On the review screen, uncheck one alarm and leave the rest
+       checked, then tap "Skip Selected". Confirm only the checked
+       alarms are skipped for tomorrow, and the unchecked one remains
+       scheduled (matches the spec's example: e.g. 7:00 AM SKIPPED,
+       8:30 AM KEPT, 6:00 PM KEPT).
+
+[ ] H. Confirm the alarm you skipped in step G does NOT ring tomorrow.
+
+[ ] I. Confirm the alarm you skipped in step G DOES still ring on its
+       next matching day after tomorrow (i.e. the recurring rule itself
+       was not disabled - only that one day was skipped).
+
+[ ] J. Confirm the alarm(s) you kept in step G still ring normally
+       tomorrow at their scheduled times.
+
+[ ] K. With multiple WEEKLY alarms scheduled for tomorrow, open the
+       review screen and tap "Skip All". Confirm every one of them is
+       skipped for tomorrow and none of the parent alarms are disabled
+       in the alarm list.
+
+[ ] L. Let a confirmation notification appear and simply ignore it (do
+       not tap anything). Confirm that when the alarm's actual time
+       arrives tomorrow, it still rings normally - "no response" must
+       never silently skip an alarm.
+
+[ ] M. Create a WEEKLY alarm, then disable "Daily alarm confirmation" in
+       Settings. Confirm no confirmation notification appears at the
+       configured time while it is disabled, and that the alarm still
+       rings normally on its own schedule.
+
+[ ] N. Re-enable "Daily alarm confirmation" in Settings. Confirm the
+       daily confirmation notification resumes at the configured time.
+
+[ ] O. Reboot the device with "Daily alarm confirmation" enabled and at
+       least one WEEKLY alarm scheduled. Confirm the confirmation
+       notification still appears at the configured time after reboot
+       (tests that the confirmation event, not just alarm occurrences,
+       survives reboot).
+
+[ ] P. Skip an occurrence for tomorrow (as in step G), then reboot the
+       device before tomorrow arrives. Confirm that occurrence is still
+       shown as skipped after reboot and does NOT ring - i.e. reboot
+       recovery must not resurrect a skipped occurrence.
+
+[ ] Q. On the review screen, tap "Skip Selected" twice quickly (or tap
+       it, then try again) on the same alarm. Confirm there is no crash
+       and no unexpected duplicate behavior (idempotent skip).
+
+[ ] R. If your device lets you deny notification permission: deny it,
+       then confirm the app does not crash, the confirmation feature
+       simply produces no visible notification, and all alarms
+       (including WEEKLY ones) continue to ring normally as scheduled.
+
+[ ] S. Confirm the app still works correctly on both a phone-sized
+       layout and, if available, a tablet or landscape wide layout - the
+       new Settings and Review screens should appear as a second pane
+       in the wide layout, matching how the existing alarm editor
+       behaves, not as a separate implementation.
+
+[ ] T. Re-run a few of Phase 1's original manual checks (creating,
+       editing, deleting a plain alarm; snooze; dismiss; a ONE_TIME
+       alarm ringing and auto-disabling) to confirm nothing about
+       ordinary Phase 1 alarm behavior regressed.

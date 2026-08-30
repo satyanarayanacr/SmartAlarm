@@ -12,38 +12,64 @@ import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
+import com.smartalarm.app.MainActivity
 import com.smartalarm.app.domain.model.Alarm
+import com.smartalarm.app.domain.usecase.ConfirmableOccurrence
 import com.smartalarm.app.receiver.AlarmActionReceiver
+import com.smartalarm.app.receiver.ConfirmationActionReceiver
 import com.smartalarm.app.ui.ringing.AlarmRingingActivity
 
 /**
- * Owns the alarm notification channel and builds the ringing notification (full-screen intent +
- * lock-screen visible + Snooze/Dismiss actions). The channel's own sound is disabled
- * ([NotificationChannel.setSound] null) because [AlarmRingingActivity] plays the alarm tone
- * itself via a looping player - a channel sound would double up with it.
+ * Owns the alarm notification channels and builds the ringing and daily-confirmation
+ * notifications.
+ *
+ * Two separate channels by design: [CHANNEL_ID] (ringing) is IMPORTANCE_HIGH, bypasses Do Not
+ * Disturb, and disables its own sound because [AlarmRingingActivity] plays the alarm tone itself
+ * via a looping player - a channel sound would double up with it. [CONFIRMATION_CHANNEL_ID] is a
+ * plain, normal-priority notification (it is a question, not an alarm ringing) and must never
+ * inherit the ringing channel's Do-Not-Disturb bypass or full-screen behavior.
  */
 object NotificationHelper {
     const val CHANNEL_ID = "alarm_ringing_channel"
     private const val CHANNEL_NAME = "Alarm ringing"
 
+    const val CONFIRMATION_CHANNEL_ID = "daily_confirmation_channel"
+    private const val CONFIRMATION_CHANNEL_NAME = "Daily alarm confirmation"
+
+    /** Fixed id for the single daily-confirmation notification - never collides with a real
+     * occurrence id (Room occurrence ids are positive, autoincrement-assigned Longs starting at 1,
+     * truncated to Int for per-occurrence notification ids - see [notificationIdFor]). */
+    private const val CONFIRMATION_NOTIFICATION_ID = -1
+
     fun ensureChannel(context: Context) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val manager = context.getSystemService(NotificationManager::class.java)
-        val existing = manager.getNotificationChannel(CHANNEL_ID)
-        if (existing != null) return
 
-        val channel = NotificationChannel(
-            CHANNEL_ID,
-            CHANNEL_NAME,
-            NotificationManager.IMPORTANCE_HIGH,
-        ).apply {
-            description = "Shown while an alarm is ringing"
-            setSound(null, null)
-            enableVibration(false) // AlarmRingingActivity/AlarmReceiver handles vibration directly
-            setBypassDnd(true)
-            lockscreenVisibility = android.app.Notification.VISIBILITY_PUBLIC
+        if (manager.getNotificationChannel(CHANNEL_ID) == null) {
+            val channel = NotificationChannel(
+                CHANNEL_ID,
+                CHANNEL_NAME,
+                NotificationManager.IMPORTANCE_HIGH,
+            ).apply {
+                description = "Shown while an alarm is ringing"
+                setSound(null, null)
+                enableVibration(false) // AlarmRingingActivity/AlarmReceiver handles vibration directly
+                setBypassDnd(true)
+                lockscreenVisibility = android.app.Notification.VISIBILITY_PUBLIC
+            }
+            manager.createNotificationChannel(channel)
         }
-        manager.createNotificationChannel(channel)
+
+        if (manager.getNotificationChannel(CONFIRMATION_CHANNEL_ID) == null) {
+            val confirmationChannel = NotificationChannel(
+                CONFIRMATION_CHANNEL_ID,
+                CONFIRMATION_CHANNEL_NAME,
+                NotificationManager.IMPORTANCE_DEFAULT,
+            ).apply {
+                description = "Asks whether you still need tomorrow's recurring alarms"
+            }
+            manager.createNotificationChannel(confirmationChannel)
+        }
     }
 
     fun areNotificationsEnabled(context: Context): Boolean =
@@ -117,6 +143,79 @@ object NotificationHelper {
 
     fun cancel(context: Context, occurrenceId: Long) {
         NotificationManagerCompat.from(context).cancel(notificationIdFor(occurrenceId))
+    }
+
+    /**
+     * Shows the daily confirmation notification for tomorrow's [confirmable] occurrences. Per the
+     * spec's example ("Tomorrow's alarms" / "You have N alarms scheduled for tomorrow."), with
+     * KEEP ALL (handled entirely by [ConfirmationActionReceiver], no app UI needed) and REVIEW
+     * (opens [MainActivity] directly onto the review screen) actions. Tapping the notification
+     * body itself also opens the review screen, same as REVIEW - both are just different ways to
+     * get to "let me look at these".
+     */
+    fun showDailyConfirmation(context: Context, confirmable: List<ConfirmableOccurrence>) {
+        ensureChannel(context)
+        if (confirmable.isEmpty()) return
+
+        val reviewPendingIntent = reviewPendingIntent(context)
+
+        val builder = NotificationCompat.Builder(context, CONFIRMATION_CHANNEL_ID)
+            .setSmallIcon(android.R.drawable.ic_lock_idle_alarm)
+            .setContentTitle("Tomorrow's alarms")
+            .setContentText(
+                "You have ${confirmable.size} alarm${if (confirmable.size == 1) "" else "s"} scheduled for tomorrow."
+            )
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .setAutoCancel(true)
+            .setContentIntent(reviewPendingIntent)
+            .addAction(NotificationCompat.Action.Builder(0, "Keep all", keepAllPendingIntent(context)).build())
+            .addAction(NotificationCompat.Action.Builder(0, "Review", reviewPendingIntent).build())
+
+        // Same inline-literal permission check as showRinging() above - see that method's long
+        // comment for why this exact form (not a helper function) is required for this to pass
+        // Android Lint's MissingPermission check, verified via a real failing lintDebug run.
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) ==
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            NotificationManagerCompat.from(context).notify(CONFIRMATION_NOTIFICATION_ID, builder.build())
+        }
+        // KNOWN PHASE 1.1 LIMITATION, same shape as showRinging()'s: if notification permission is
+        // revoked, this notification is skipped entirely for that day. Per the spec's explicit
+        // "do not treat lack of notification permission as user choosing SKIP" rule, this is
+        // exactly right, not a bug to work around - every occurrence simply stays SCHEDULED
+        // (its real default), the user just never saw a prompt asking otherwise.
+    }
+
+    fun cancelDailyConfirmation(context: Context) {
+        NotificationManagerCompat.from(context).cancel(CONFIRMATION_NOTIFICATION_ID)
+    }
+
+    private fun reviewPendingIntent(context: Context): PendingIntent {
+        val intent = Intent(context, MainActivity::class.java).apply {
+            action = MainActivity.ACTION_REVIEW_TOMORROWS_ALARMS
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or
+                Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                Intent.FLAG_ACTIVITY_SINGLE_TOP
+        }
+        return PendingIntent.getActivity(
+            context,
+            CONFIRMATION_NOTIFICATION_ID,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+    }
+
+    private fun keepAllPendingIntent(context: Context): PendingIntent {
+        val intent = Intent(context, ConfirmationActionReceiver::class.java).apply {
+            action = ConfirmationActionReceiver.ACTION_KEEP_ALL
+        }
+        return PendingIntent.getBroadcast(
+            context,
+            CONFIRMATION_NOTIFICATION_ID,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
     }
 
     private fun snoozeAction(context: Context, occurrenceId: Long): NotificationCompat.Action {

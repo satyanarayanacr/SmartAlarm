@@ -1,0 +1,463 @@
+SMART ALARM - PHASE 1.1 - DAILY ALARM CONFIRMATION / SKIP-TOMORROW FLOW
+COMPLETION REPORT
+Date: 2026-08-30
+Repository: https://github.com/satyanarayanacr/SmartAlarm (branch: main)
+Sandbox commit for this phase: 927abecd9f3c9bca88b361d70b9af2c3d53eb70c
+  (commit made in the working sandbox only - see section 21, GIT, for how
+  this lands on your real repository)
+
+============================================================
+1. SCOPE OF PHASE 1.1
+============================================================
+This is an incremental addition on top of the already-verified Phase 1
+Android app. Nothing about Phase 1 was restarted, rewritten, or removed.
+
+Implemented in this phase:
+  - A user-configurable daily "confirmation" check (default 9:00 PM) that
+    looks at tomorrow's WEEKLY-recurring alarm occurrences and lets the
+    user KEEP or SKIP each one for tomorrow only, without touching the
+    recurring rule itself.
+  - A notification ("Tomorrow's alarms") with Keep All / Review actions.
+  - A review screen listing every WEEKLY alarm occurrence scheduled for
+    tomorrow, with per-alarm checkboxes and Keep Selected / Skip Selected
+    / (Keep All / Skip All) actions.
+  - A new persisted global setting (enabled + confirmation time),
+    editable from a new Settings screen reachable from the alarm list.
+  - A new terminal occurrence state, SKIPPED, that cancels just that one
+    occurrence's AlarmManager entry while leaving the parent Alarm and
+    all other occurrences untouched.
+  - Reboot recovery extended so the daily confirmation event is always
+    re-armed, and SKIPPED occurrences are never resurrected.
+  - A non-destructive Room migration (schema version 1 -> 2) adding one
+    new table. No changes to the existing alarms / alarm_occurrences
+    tables.
+
+Explicitly NOT in this phase (per the Phase 1.1 spec): Phase 2
+(location/geofencing), Phase 3 (timezone-change behavior), and any
+Future-phase feature (email, calendar, YouTube alarm sounds, AI, cloud
+sync, multi-device sync). None of that was started or touched.
+
+============================================================
+2. IMPLEMENTATION SUMMARY
+============================================================
+The existing Alarm -> AlarmOccurrence -> AlarmManager model from Phase 1
+was extended rather than replaced. The confirmation feature is built as
+its own small vertical slice (settings, use cases, a dedicated scheduler,
+a dedicated receiver, dedicated UI) that reads and writes the existing
+occurrence data rather than introducing a parallel scheduling path.
+
+Key design decisions:
+  - Only one new occurrence status was added (SKIPPED). "Keep" needed no
+    new state: a SCHEDULED occurrence that is kept is simply left alone,
+    which also naturally implements the required "no response -> keep"
+    default (doing nothing is exactly the keep behavior).
+  - The daily confirmation event uses a single, fixed AlarmManager
+    request code (not one per alarm) registered against its own
+    BroadcastReceiver (ConfirmationReceiver), because there is exactly
+    one confirmation event per day, independent of how many alarms
+    exist. This is the same FLAG_UPDATE_CURRENT idempotency pattern
+    Phase 1 already uses per-occurrence, just simplified to a single id.
+  - Confirmation scheduling is fully idempotent and stateless beyond the
+    persisted settings: it is always recomputed from
+    (current settings, current time), never from a separately stored
+    "next trigger" value. This means reboot recovery and app-launch
+    recovery can both just call the same "reschedule" use case
+    unconditionally, with no separate restore-only code path to keep in
+    sync.
+  - Skipping an occurrence that belongs to a WEEKLY alarm immediately
+    computes and schedules the alarm's next occurrence, anchored to the
+    skipped occurrence's own scheduled time (not to "now"). This matters
+    because the confirmation fires the evening before the alarm time
+    (e.g. 9 PM the night before a 7 AM alarm) - anchoring to "now" would
+    find the same still-in-the-future occurrence again instead of
+    advancing to the following week.
+
+============================================================
+3. CONFIRMATION WORKFLOW
+============================================================
+Daily (if enabled in settings):
+  1. At the configured confirmation time (default 9:00 PM), the
+     ConfirmationReceiver fires via a real exact AlarmManager alarm.
+  2. It looks up every SCHEDULED AlarmOccurrence whose time falls within
+     tomorrow (the calendar day after the device's current local date),
+     restricted to alarms whose repeatType is WEEKLY. ONE_TIME alarms are
+     never included.
+  3. If that list is non-empty, it shows the "Tomorrow's alarms"
+     notification with a count and two actions: Keep All, Review.
+  4. It then re-arms itself for the following day's confirmation time
+     (idempotent - see section 2).
+  5. If the user does nothing: every occurrence stays SCHEDULED and rings
+     normally. No automatic skipping ever happens.
+  6. If the user taps Keep All: the notification is dismissed; no
+     occurrence state changes (Keep is always a no-op, per section 2).
+  7. If the user taps Review: the app opens directly to a review screen
+     listing each tomorrow-WEEKLY occurrence with a checkbox (all checked
+     by default) and four actions: Keep All, Skip All, Keep Selected
+     (acts on checked items), Skip Selected (acts on checked items).
+  8. Skipping an occurrence: cancels that occurrence's own AlarmManager
+     entry, marks it SKIPPED, and (because its alarm is WEEKLY and still
+     enabled) immediately schedules that alarm's next real occurrence for
+     the following matching day. The parent Alarm is never disabled and
+     no other occurrence is touched.
+  9. Keeping an occurrence: no state change; it remains SCHEDULED and
+     will ring at its normal time.
+
+Race conditions handled (spec section 12):
+  - Skip processed before the occurrence fires: proceeds as above.
+  - Occurrence has already fired (or is not SCHEDULED for any other
+    reason - MISSED, already SKIPPED, DISMISSED, SNOOZED, unknown id) by
+    the time a keep/skip decision is processed: the use case returns the
+    occurrence unchanged and takes no action. This also directly covers
+    "user presses Skip twice" and "notification delivered twice" -
+    both are idempotent no-ops on the second call, since after the first
+    call the occurrence is no longer SCHEDULED.
+
+============================================================
+4. DATABASE CHANGES
+============================================================
+Room schema version bumped 1 -> 2. One new table added; the existing
+`alarms` and `alarm_occurrences` tables are unchanged.
+
+New table: confirmation_settings (singleton row, fixed id = 1)
+  - id            INTEGER  PRIMARY KEY (always 1)
+  - isEnabled     INTEGER  (0/1)
+  - hour          INTEGER  (0-23)
+  - minute        INTEGER  (0-59)
+  - updatedAt     INTEGER  (epoch millis)
+
+No column was added to, removed from, or retyped on any existing table.
+The new OccurrenceStatus.SKIPPED value lives in the existing
+alarm_occurrences.status TEXT column and required no schema change.
+
+============================================================
+5. SCHEDULER CHANGES
+============================================================
+- New ConfirmationScheduler interface + AndroidConfirmationScheduler
+  implementation, deliberately separate from the existing
+  AlarmScheduler/AndroidAlarmScheduler used for per-occurrence alarms
+  (not a second incompatible mechanism - it uses the same AlarmManager
+  exact-alarm APIs and the same exact-alarm permission check pattern,
+  just scoped to a single global event instead of one per occurrence).
+- AlarmSchedulingCoordinator.scheduleNextOccurrence gained a new,
+  optional, backward-compatible `fromInstant` parameter (defaults to the
+  existing "now" behavior, so every Phase 1 call site is unaffected)
+  used only by the skip flow to anchor next-occurrence math to the
+  skipped occurrence's own time rather than the confirmation-firing time.
+
+============================================================
+6. NOTIFICATION CHANGES
+============================================================
+- New notification channel (separate from the existing ringing channel)
+  for the daily confirmation notification, IMPORTANCE_DEFAULT.
+- New notification: title "Tomorrow's alarms", body states the count of
+  alarms scheduled for tomorrow, actions Keep All and Review.
+- Tapping Review opens MainActivity directly onto the review screen.
+- Tapping Keep All dismisses the notification only; no data changes.
+- The exact same inline permission-check pattern already proven (by a
+  real Phase 1 build) to satisfy Android Lint's MissingPermission check
+  was reused verbatim for this new notification call.
+
+============================================================
+7. UI CHANGES
+============================================================
+- Alarm list screen: added a "Settings" action in the top bar.
+- New Settings screen: enable/disable switch for daily confirmation, plus
+  a time picker for the confirmation time (shown only while enabled).
+  Uses the project's established fillMaxWidth/widthIn layout approach
+  rather than Compose's weight() modifiers, consistent with the existing
+  Phase 1 workaround for the weight() binary-incompatibility issue
+  documented during Phase 1.
+- New Review screen: one row per tomorrow's WEEKLY occurrence with a
+  checkbox (checked = "include in whichever action I press next"),
+  showing the alarm's name and time, with Keep All / Skip All / Keep
+  Selected / Skip Selected actions.
+- Both new screens participate in the existing adaptive two-pane wide
+  layout (tablet/landscape) the same way the existing alarm editor does,
+  and fall back to full-screen navigation on compact layouts. No separate
+  phone/tablet implementations were created.
+
+============================================================
+8. FILES ADDED (26)
+============================================================
+android/app/src/main/java/com/smartalarm/app/data/local/Migrations.kt
+android/app/src/main/java/com/smartalarm/app/data/local/dao/ConfirmationSettingsDao.kt
+android/app/src/main/java/com/smartalarm/app/data/local/entity/ConfirmationSettingsEntity.kt
+android/app/src/main/java/com/smartalarm/app/domain/ConfirmationTimeCalculator.kt
+android/app/src/main/java/com/smartalarm/app/domain/model/ConfirmationSettings.kt
+android/app/src/main/java/com/smartalarm/app/domain/usecase/GetTomorrowsConfirmableOccurrencesUseCase.kt
+android/app/src/main/java/com/smartalarm/app/domain/usecase/KeepOccurrenceUseCase.kt
+android/app/src/main/java/com/smartalarm/app/domain/usecase/KeepOccurrencesUseCase.kt
+android/app/src/main/java/com/smartalarm/app/domain/usecase/ScheduleDailyConfirmationUseCase.kt
+android/app/src/main/java/com/smartalarm/app/domain/usecase/SkipOccurrenceUseCase.kt
+android/app/src/main/java/com/smartalarm/app/domain/usecase/SkipOccurrencesUseCase.kt
+android/app/src/main/java/com/smartalarm/app/domain/usecase/UpdateConfirmationSettingsUseCase.kt
+android/app/src/main/java/com/smartalarm/app/receiver/ConfirmationActionReceiver.kt
+android/app/src/main/java/com/smartalarm/app/receiver/ConfirmationReceiver.kt
+android/app/src/main/java/com/smartalarm/app/scheduler/AndroidConfirmationScheduler.kt
+android/app/src/main/java/com/smartalarm/app/scheduler/ConfirmationScheduler.kt
+android/app/src/main/java/com/smartalarm/app/ui/confirmation/ConfirmationReviewScreen.kt
+android/app/src/main/java/com/smartalarm/app/ui/confirmation/ConfirmationSettingsScreen.kt
+android/app/src/main/java/com/smartalarm/app/ui/confirmation/ConfirmationViewModel.kt
+android/app/src/test/java/com/smartalarm/app/domain/ConfirmationTimeCalculatorTest.kt
+android/app/src/test/java/com/smartalarm/app/domain/usecase/BatchKeepSkipOccurrencesUseCaseTest.kt
+android/app/src/test/java/com/smartalarm/app/domain/usecase/GetTomorrowsConfirmableOccurrencesUseCaseTest.kt
+android/app/src/test/java/com/smartalarm/app/domain/usecase/KeepOccurrenceUseCaseTest.kt
+android/app/src/test/java/com/smartalarm/app/domain/usecase/ScheduleDailyConfirmationUseCaseTest.kt
+android/app/src/test/java/com/smartalarm/app/domain/usecase/SkipOccurrenceUseCaseTest.kt
+android/app/src/test/java/com/smartalarm/app/fakes/FakeConfirmationScheduler.kt
+
+============================================================
+9. FILES MODIFIED (16)
+============================================================
+android/app/src/main/AndroidManifest.xml
+android/app/src/main/java/com/smartalarm/app/MainActivity.kt
+android/app/src/main/java/com/smartalarm/app/ServiceLocator.kt
+android/app/src/main/java/com/smartalarm/app/SmartAlarmApplication.kt
+android/app/src/main/java/com/smartalarm/app/data/local/SmartAlarmDatabase.kt
+android/app/src/main/java/com/smartalarm/app/data/local/dao/AlarmOccurrenceDao.kt
+android/app/src/main/java/com/smartalarm/app/data/repository/AlarmRepository.kt
+android/app/src/main/java/com/smartalarm/app/data/repository/RoomAlarmRepository.kt
+android/app/src/main/java/com/smartalarm/app/domain/AlarmSchedulingCoordinator.kt
+android/app/src/main/java/com/smartalarm/app/domain/model/OccurrenceStatus.kt
+android/app/src/main/java/com/smartalarm/app/domain/usecase/RescheduleAllUseCase.kt
+android/app/src/main/java/com/smartalarm/app/notification/NotificationHelper.kt
+android/app/src/main/java/com/smartalarm/app/ui/alarms/AlarmListScreen.kt
+android/app/src/main/java/com/smartalarm/app/ui/navigation/SmartAlarmNavHost.kt
+android/app/src/test/java/com/smartalarm/app/domain/usecase/RescheduleAllUseCaseTest.kt
+android/app/src/test/java/com/smartalarm/app/fakes/FakeAlarmRepository.kt
+
+============================================================
+10. FILES DELETED
+============================================================
+None.
+
+============================================================
+11. DEPENDENCIES ADDED OR CHANGED
+============================================================
+None. This phase uses only APIs already present in the project from
+Phase 1 (Room, AlarmManager, Jetpack Compose, kotlinx.coroutines,
+kotlinx-datetime/java.time). app/build.gradle.kts and
+gradle/libs.versions.toml are unchanged by this phase (confirmed via
+git diff - no changes to either file).
+
+============================================================
+12. ROOM MIGRATION DETAILS
+============================================================
+MIGRATION_1_2 (in Migrations.kt), registered in SmartAlarmDatabase's
+migration list:
+  - CREATE TABLE IF NOT EXISTS confirmation_settings (...) - see section
+    4 for the column list.
+  - INSERT OR IGNORE seeds the single row (id=1) with the shipped
+    defaults (enabled, 21:00) so the settings are valid immediately after
+    upgrade, before any UI screen or background receiver has had a chance
+    to write anything.
+  - Non-destructive: no ALTER TABLE, no DROP TABLE, nothing touches
+    `alarms` or `alarm_occurrences`. Existing Phase 1 alarms and
+    occurrences are untouched by this migration.
+  - exportSchema is already enabled from Phase 1 (writes JSON schema
+    snapshots to app/schemas on build). The version-2 schema snapshot
+    will be generated the first time the project is actually compiled
+    with this change - it does not exist yet in this sandbox because no
+    real build has been run (see section 15).
+
+============================================================
+13. TESTS CREATED
+============================================================
+7 new JVM unit test files, plus 2 existing test files extended, covering
+all 18 minimum test scenarios listed in the Phase 1.1 spec:
+
+  ConfirmationTimeCalculatorTest.kt
+    - confirmation trigger computed for today vs. rolled to tomorrow
+      (spec test 3)
+    - exact-boundary behavior
+    - tomorrow's date range, including a month-boundary case (spec test 4)
+
+  GetTomorrowsConfirmableOccurrencesUseCaseTest.kt
+    - a WEEKLY alarm's tomorrow occurrence requires confirmation
+      (spec test 1)
+    - a ONE_TIME alarm's tomorrow occurrence does NOT require
+      confirmation (spec test 2)
+    - multiple alarms scheduled for tomorrow are all returned
+      (spec test 5)
+    - a non-tomorrow / already-SKIPPED occurrence is excluded
+
+  KeepOccurrenceUseCaseTest.kt
+    - keeping an occurrence leaves it SCHEDULED and otherwise unchanged
+      (spec test 12)
+    - no-response-equivalent case: an occurrence nobody acted on remains
+      SCHEDULED (spec test 13)
+
+  SkipOccurrenceUseCaseTest.kt
+    - skipping marks the occurrence SKIPPED and cancels its scheduled
+      entry (spec test 10)
+    - skipping does NOT reschedule the SKIPPED occurrence itself
+      (spec test 11)
+    - skipping one WEEKLY occurrence does not disable the parent alarm
+      and does not affect other occurrences (spec test 15 + section 1's
+      explicit example)
+    - skipping an occurrence that is not SCHEDULED (already fired,
+      already skipped, or an unknown id) is a safe no-op
+      (race conditions 3, 4, and the unknown-id case)
+
+  BatchKeepSkipOccurrencesUseCaseTest.kt (3-alarm scenario matching the
+  spec's own Wake Up / Office / Gym example)
+    - Keep All leaves every occurrence scheduled (spec test 6)
+    - Skip All marks every occurrence skipped (spec test 7)
+    - Keep Selected only touches the chosen subset (spec test 8)
+    - Skip Selected only skips the chosen subset, others remain kept
+      (spec test 9, matches the spec's mixed-result example)
+
+  ScheduleDailyConfirmationUseCaseTest.kt
+    - enabled default settings schedule today's/tomorrow's confirmation
+      correctly
+    - disabling the global setting cancels the scheduled event and
+      schedules nothing further (spec test 17)
+    - scheduling repeatedly is idempotent (same trigger time every time,
+      not additive) (spec test 14 - duplicate processing is safe)
+    - changing the confirmation time reschedules to the new time
+
+  RescheduleAllUseCaseTest.kt (extended; 4 pre-existing Phase 1 tests
+  left untouched and still present)
+    - boot recovery does not restore a SKIPPED occurrence (spec test 16)
+    - boot recovery also restores/re-arms the daily confirmation event
+
+  FakeAlarmRepository.kt / FakeConfirmationScheduler.kt - test doubles
+  extended/added to support the above, mirroring the existing
+  FakeAlarmScheduler pattern from Phase 1.
+
+Existing Phase 1 test files were not deleted or reduced; the only
+existing test file touched is RescheduleAllUseCaseTest.kt, which had
+tests ADDED and its constructor call updated for the new parameter -
+all 4 of its original tests are unchanged (spec test 18: existing Phase
+1 tests continue to pass - see section 15 for why this is not yet
+verified).
+
+============================================================
+14. TESTS EXECUTED
+============================================================
+NONE HAVE BEEN RUN YET. This sandbox has no Android SDK, JDK/Gradle
+Android toolchain, or emulator/device - all real Gradle builds and test
+runs for this project happen on your Windows machine at E:\SmartAlarm,
+exactly as in Phase 1. See section 15/16/17.
+
+============================================================
+15. TEST RESULTS
+============================================================
+Not available yet - no build has been run. This section will be updated
+honestly once you report back the real output of the commands in
+section 16.
+
+============================================================
+16. BUILD COMMANDS TO RUN
+============================================================
+On your machine, after the new/changed files below have been placed into
+E:\SmartAlarm\android (see section 19 for delivery), run:
+
+    gradlew.bat clean build
+    gradlew.bat assembleDebug
+
+Please paste back the actual, complete, verbatim output of both
+commands (or at least the final summary plus any FAILED/error lines),
+including any Kotlin compiler errors, KAPT/Room annotation-processor
+errors, unit test failures, or Lint errors. I will fix any real issues
+that surface using that evidence - nothing in this report is a
+substitute for that.
+
+============================================================
+17. BUILD RESULT
+============================================================
+NOT YET RUN. Per this project's standing rule, I am not claiming Phase
+1.1 builds or works until a real `gradlew.bat clean build` /
+`assembleDebug` run on your machine actually succeeds and you report the
+output back to me.
+
+============================================================
+18. APK PATH
+============================================================
+NOT YET AVAILABLE. No APK has been built for Phase 1.1. Once you report
+a successful assembleDebug, I will ask you to run a directory listing
+(or I will verify via the device bridge) to get the real path and a
+SHA-256 hash, the same verification approach used in Phase 1 - I will
+not invent or guess a path.
+
+============================================================
+19. KNOWN LIMITATIONS
+============================================================
+- Not yet build-verified (see sections 14-18) - this is the most
+  important open item.
+- The confirmation notification's "Review" action opens the app to the
+  review screen; if notification permission (Android 13+
+  POST_NOTIFICATIONS) is denied, no confirmation notification can be
+  shown at all. Per spec section 17, this is treated as: no crash, no
+  occurrence is silently modified, lack of permission is never treated
+  as the user choosing SKIP, and every occurrence stays scheduled and
+  will still ring normally. This mirrors the exact same limitation
+  already present and documented for Phase 1's ringing notification -
+  it has not been separately "solved" beyond that existing fallback
+  behavior, since the spec does not ask for anything beyond it.
+  A user who denies notification permission entirely will not see daily
+  confirmation prompts, but will also never have an alarm silently
+  skipped as a result - alarms simply ring as normal.
+  a general settings/manual path to review or manage upcoming
+  occurrences is only available through the Settings/Review screens
+  described in section 7, both of which are reachable at any time, not
+  only from the notification.
+- Only JVM unit tests were written (matching the project's existing
+  Phase 1 testing approach, which also has no
+  Robolectric/instrumentation tests). No instrumented or Compose UI
+  tests were added for the new screens; the spec allows this
+  ("Add instrumented/UI tests where practical") and treats manual device
+  testing (section 20) as the primary verification for UI behavior.
+- The version-2 Room schema JSON snapshot (app/schemas) has not been
+  generated yet, since it is produced by the Kotlin/KAPT compiler at
+  build time and no build has run in this sandbox.
+
+============================================================
+20. MANUAL DEVICE TEST CHECKLIST
+============================================================
+See the accompanying file PHASE_1_1_MANUAL_TEST_CHECKLIST.txt. I have
+not performed any of those tests myself - they must be run by you on a
+real device.
+
+============================================================
+21. GIT
+============================================================
+Files added: 26 (listed in section 8)
+Files modified: 16 (listed in section 9)
+Files deleted: 0
+
+This work exists right now only as a commit in my own working sandbox
+(hash 927abecd9f3c9bca88b361d70b9af2c3d53eb70c) - that sandbox's git
+history is NOT the same as your real repository (this was discovered and
+explained for Phase 1 in PHASE_1_ANDROID_REPORT.txt section 6: your real
+origin/main already contains commits my sandbox never saw). So, exactly
+as with Phase 1, I am not asking you to fetch/merge/rebase from my
+sandbox. Instead:
+
+1. I am delivering every added/modified file listed in sections 8 and 9
+   directly into your E:\SmartAlarm\android folder (plus this report and
+   the manual test checklist into E:\SmartAlarm).
+2. Once you've placed them and confirmed the build (section 16), commit
+   this Phase 1.1 work as a new, separate commit on top of whatever your
+   real main branch currently has (which should already include the
+   Phase 1 commit from the previous instructions, if you've pushed that):
+
+       cd E:\SmartAlarm
+       git status
+       git add -A
+       git commit -m "Phase 1.1: Daily alarm confirmation / skip-tomorrow flow for weekly alarms"
+       git push origin main
+
+3. Please run `git log -1 --oneline` after committing and share the real
+   resulting commit hash with me - I will not invent one. This keeps
+   Phase 1's history intact (no rewrite, no force-push, no deletion of
+   the Phase 1 implementation), exactly as spec section 23 requires.
+
+============================================================
+STOP - PHASE 1.1 IMPLEMENTATION COMPLETE, AWAITING YOUR REVIEW
+============================================================
+Per the Phase 1.1 spec's explicit instruction, I am stopping here. No
+Phase 2 (location/geofencing), Phase 3 (timezone), or Future-phase work
+(email/calendar/YouTube/AI/cloud sync/multi-device sync) has been started
+or will be started until you review this phase, run the real build, and
+give explicit approval to continue.

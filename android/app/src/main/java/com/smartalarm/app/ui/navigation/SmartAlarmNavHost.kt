@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -21,27 +22,55 @@ import com.smartalarm.app.domain.model.Alarm
 import com.smartalarm.app.ui.alarms.AlarmEditScreen
 import com.smartalarm.app.ui.alarms.AlarmListScreen
 import com.smartalarm.app.ui.alarms.AlarmListViewModel
+import com.smartalarm.app.ui.confirmation.ConfirmationReviewScreen
+import com.smartalarm.app.ui.confirmation.ConfirmationSettingsScreen
+import com.smartalarm.app.ui.confirmation.ConfirmationViewModel
 
 private const val ROUTE_LIST = "alarms"
 private const val ROUTE_EDIT = "alarm_edit/{alarmId}"
+private const val ROUTE_SETTINGS = "confirmation_settings"
+private const val ROUTE_REVIEW = "confirmation_review"
 private const val NEW_ALARM_ID = -1L
+
+/** What the wide-layout secondary pane currently shows, alongside the always-visible alarm list. */
+private sealed interface SecondaryPane {
+    data object None : SecondaryPane
+    data class Editor(val alarm: Alarm?) : SecondaryPane
+    data object Settings : SecondaryPane
+    data object Review : SecondaryPane
+}
 
 /**
  * Root navigation host. [isWideLayout] (computed once in MainActivity from the window width)
- * decides the *arrangement* only: compact width navigates between full-screen list/edit
- * destinations as normal, expanded width shows both side by side using the same two composables
- * and the same NavController-driven state - one Compose codebase for both phone and tablet, per
- * the Phase 1 spec.
+ * decides the *arrangement* only: compact width navigates between full-screen destinations as
+ * normal, expanded width shows the alarm list alongside a secondary pane using the same
+ * composables and the same NavController-driven/state-driven data - one Compose codebase for both
+ * phone and tablet, per the Phase 1 spec (and Phase 1.1's settings/review screens follow the same
+ * rule).
+ *
+ * [reviewRequestId] increments every time MainActivity receives a "review tomorrow's alarms"
+ * intent (the daily confirmation notification's REVIEW action or content tap) - observed here so
+ * tapping that notification opens the review screen regardless of which screen was showing.
  */
 @Composable
-fun SmartAlarmNavHost(locator: ServiceLocator, isWideLayout: Boolean) {
+fun SmartAlarmNavHost(locator: ServiceLocator, isWideLayout: Boolean, reviewRequestId: Int = 0) {
     val navController = rememberNavController()
     val viewModel: AlarmListViewModel = viewModel(factory = AlarmListViewModel.Factory(locator))
     val uiState by viewModel.uiState.collectAsState()
+    val confirmationViewModel: ConfirmationViewModel = viewModel(factory = ConfirmationViewModel.Factory(locator))
+    val confirmationSettings by confirmationViewModel.settings.collectAsState()
+    val reviewState by confirmationViewModel.reviewState.collectAsState()
 
     if (isWideLayout) {
         var selectedAlarm by remember { mutableStateOf<Alarm?>(null) }
-        var showEditor by remember { mutableStateOf(false) }
+        var secondaryPane by remember { mutableStateOf<SecondaryPane>(SecondaryPane.None) }
+
+        LaunchedEffect(reviewRequestId) {
+            if (reviewRequestId > 0) {
+                confirmationViewModel.loadTomorrowsOccurrences()
+                secondaryPane = SecondaryPane.Review
+            }
+        }
 
         // NOTE: uses Modifier.fillMaxWidth(fraction) instead of RowScope.weight() to split the
         // two panes. weight() is the more idiomatic Compose API for this and was used originally,
@@ -61,23 +90,61 @@ fun SmartAlarmNavHost(locator: ServiceLocator, isWideLayout: Boolean) {
             AlarmListScreen(
                 alarms = uiState.alarms,
                 occurrences = uiState.occurrences,
-                onAddAlarm = { selectedAlarm = null; showEditor = true },
-                onEditAlarm = { selectedAlarm = it; showEditor = true },
+                onAddAlarm = { selectedAlarm = null; secondaryPane = SecondaryPane.Editor(null) },
+                onEditAlarm = { selectedAlarm = it; secondaryPane = SecondaryPane.Editor(it) },
                 onToggleAlarm = viewModel::toggleEnabled,
-                onDeleteAlarm = { viewModel.delete(it); if (selectedAlarm?.id == it.id) showEditor = false },
-                modifier = Modifier.fillMaxWidth(if (showEditor) 0.5f else 1f),
+                onDeleteAlarm = {
+                    viewModel.delete(it)
+                    if (selectedAlarm?.id == it.id) secondaryPane = SecondaryPane.None
+                },
+                onOpenSettings = { secondaryPane = SecondaryPane.Settings },
+                modifier = Modifier.fillMaxWidth(if (secondaryPane == SecondaryPane.None) 1f else 0.5f),
             )
-            if (showEditor) {
-                AlarmEditScreen(
-                    alarmToEdit = selectedAlarm,
-                    onSave = { viewModel.save(it); showEditor = false },
-                    onDelete = { viewModel.delete(it); showEditor = false },
-                    onCancel = { showEditor = false },
+            when (val pane = secondaryPane) {
+                is SecondaryPane.Editor -> AlarmEditScreen(
+                    alarmToEdit = pane.alarm,
+                    onSave = { viewModel.save(it); secondaryPane = SecondaryPane.None },
+                    onDelete = { viewModel.delete(it); secondaryPane = SecondaryPane.None },
+                    onCancel = { secondaryPane = SecondaryPane.None },
                     modifier = Modifier.fillMaxWidth(0.5f),
                 )
+                SecondaryPane.Settings -> ConfirmationSettingsScreen(
+                    settings = confirmationSettings,
+                    onSettingsChanged = confirmationViewModel::updateSettings,
+                    onBack = { secondaryPane = SecondaryPane.None },
+                    modifier = Modifier.fillMaxWidth(0.5f),
+                )
+                SecondaryPane.Review -> ConfirmationReviewScreen(
+                    isLoading = reviewState.isLoading,
+                    confirmable = reviewState.confirmable,
+                    onKeepAll = {
+                        confirmationViewModel.keepSelected(reviewState.confirmable.map { it.occurrence.id }) {
+                            secondaryPane = SecondaryPane.None
+                        }
+                    },
+                    onSkipAll = {
+                        confirmationViewModel.skipSelected(reviewState.confirmable.map { it.occurrence.id }) {
+                            secondaryPane = SecondaryPane.None
+                        }
+                    },
+                    onKeepSelected = { ids -> confirmationViewModel.keepSelected(ids) { secondaryPane = SecondaryPane.None } },
+                    onSkipSelected = { ids -> confirmationViewModel.skipSelected(ids) { secondaryPane = SecondaryPane.None } },
+                    onBack = { secondaryPane = SecondaryPane.None },
+                    modifier = Modifier.fillMaxWidth(0.5f),
+                )
+                SecondaryPane.None -> Unit
             }
         }
         return
+    }
+
+    // Compact layout: tapping the confirmation notification navigates straight to the review
+    // route, regardless of whatever screen was already on-screen/backstacked.
+    LaunchedEffect(reviewRequestId) {
+        if (reviewRequestId > 0) {
+            confirmationViewModel.loadTomorrowsOccurrences()
+            navController.navigate(ROUTE_REVIEW)
+        }
     }
 
     NavHost(navController = navController, startDestination = ROUTE_LIST) {
@@ -89,6 +156,7 @@ fun SmartAlarmNavHost(locator: ServiceLocator, isWideLayout: Boolean) {
                 onEditAlarm = { navController.navigate("alarm_edit/${it.id}") },
                 onToggleAlarm = viewModel::toggleEnabled,
                 onDeleteAlarm = { viewModel.delete(it) },
+                onOpenSettings = { navController.navigate(ROUTE_SETTINGS) },
             )
         }
         composable(
@@ -102,6 +170,32 @@ fun SmartAlarmNavHost(locator: ServiceLocator, isWideLayout: Boolean) {
                 onSave = { viewModel.save(it); navController.popBackStack() },
                 onDelete = { viewModel.delete(it); navController.popBackStack() },
                 onCancel = { navController.popBackStack() },
+            )
+        }
+        composable(ROUTE_SETTINGS) {
+            ConfirmationSettingsScreen(
+                settings = confirmationSettings,
+                onSettingsChanged = confirmationViewModel::updateSettings,
+                onBack = { navController.popBackStack() },
+            )
+        }
+        composable(ROUTE_REVIEW) {
+            ConfirmationReviewScreen(
+                isLoading = reviewState.isLoading,
+                confirmable = reviewState.confirmable,
+                onKeepAll = {
+                    confirmationViewModel.keepSelected(reviewState.confirmable.map { it.occurrence.id }) {
+                        navController.popBackStack()
+                    }
+                },
+                onSkipAll = {
+                    confirmationViewModel.skipSelected(reviewState.confirmable.map { it.occurrence.id }) {
+                        navController.popBackStack()
+                    }
+                },
+                onKeepSelected = { ids -> confirmationViewModel.keepSelected(ids) { navController.popBackStack() } },
+                onSkipSelected = { ids -> confirmationViewModel.skipSelected(ids) { navController.popBackStack() } },
+                onBack = { navController.popBackStack() },
             )
         }
     }

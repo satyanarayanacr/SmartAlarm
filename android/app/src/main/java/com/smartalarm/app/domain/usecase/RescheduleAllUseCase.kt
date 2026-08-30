@@ -21,10 +21,20 @@ import java.time.ZoneId
  * As a final safety net, any enabled alarm left with no SCHEDULED occurrence at all (e.g. it was
  * created and the app was killed before the alarm broadcast/receiver had a chance to run) gets a
  * fresh occurrence computed.
+ *
+ * SKIPPED occurrences are never touched here: [AlarmRepository.getAllPendingOccurrences] only
+ * ever returns SCHEDULED/SNOOZED rows, so a skipped occurrence is neither re-armed nor
+ * resurrected by this pass - satisfying the Phase 1.1 spec's "do not restore SKIPPED occurrences".
+ *
+ * Phase 1.1: also restores the single daily-confirmation event (see
+ * [ScheduleDailyConfirmationUseCase]) - AlarmManager forgets it across reboot exactly like it
+ * forgets occurrence alarms, and re-deriving it from settings is idempotent (a no-op, or a
+ * cancel, if the feature is disabled), so it is always safe to call unconditionally here.
  */
 class RescheduleAllUseCase(
     private val repository: AlarmRepository,
     private val coordinator: AlarmSchedulingCoordinator,
+    private val scheduleDailyConfirmationUseCase: ScheduleDailyConfirmationUseCase,
 ) {
     suspend fun execute(
         zone: ZoneId = ZoneId.systemDefault(),
@@ -53,5 +63,7 @@ class RescheduleAllUseCase(
                 coordinator.scheduleNextOccurrence(alarm, zone, nowMillis)
             }
         }
+
+        scheduleDailyConfirmationUseCase.execute(zone, nowMillis)
     }
 }

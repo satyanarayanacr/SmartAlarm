@@ -2,16 +2,19 @@ package com.smartalarm.app.data.repository
 
 import com.smartalarm.app.data.local.dao.AlarmDao
 import com.smartalarm.app.data.local.dao.AlarmOccurrenceDao
+import com.smartalarm.app.data.local.dao.ConfirmationSettingsDao
 import com.smartalarm.app.data.local.entity.toDomain
 import com.smartalarm.app.data.local.entity.toEntity
 import com.smartalarm.app.domain.model.Alarm
 import com.smartalarm.app.domain.model.AlarmOccurrence
+import com.smartalarm.app.domain.model.ConfirmationSettings
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 
 class RoomAlarmRepository(
     private val alarmDao: AlarmDao,
     private val occurrenceDao: AlarmOccurrenceDao,
+    private val confirmationSettingsDao: ConfirmationSettingsDao,
 ) : AlarmRepository {
 
     override fun observeAlarms(): Flow<List<Alarm>> =
@@ -54,5 +57,26 @@ class RoomAlarmRepository(
             occurrenceDao.update(occurrence.toEntity())
             occurrence.id
         }
+    }
+
+    override suspend fun getScheduledOccurrencesBetween(startMillis: Long, endMillis: Long): List<AlarmOccurrence> =
+        occurrenceDao.getScheduledInRange(startMillis, endMillis).map { it.toDomain() }
+
+    override fun observeConfirmationSettings(): Flow<ConfirmationSettings> =
+        confirmationSettingsDao.observe().map { it?.toDomain() ?: ConfirmationSettings() }
+
+    override suspend fun getConfirmationSettings(): ConfirmationSettings {
+        val existing = confirmationSettingsDao.get()
+        if (existing != null) return existing.toDomain()
+
+        // No row yet (fresh install, or an upgrade that didn't go through MIGRATION_1_2) - persist
+        // the shipped defaults now so every subsequent read/schedule call sees a real, stable row.
+        val defaults = ConfirmationSettings(updatedAt = System.currentTimeMillis())
+        confirmationSettingsDao.upsert(defaults.toEntity())
+        return defaults
+    }
+
+    override suspend fun saveConfirmationSettings(settings: ConfirmationSettings) {
+        confirmationSettingsDao.upsert(settings.toEntity())
     }
 }

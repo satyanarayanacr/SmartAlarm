@@ -71,6 +71,15 @@
             </intent-filter>
         </receiver>
 
+        <!-- Phase 1.1: daily alarm confirmation. -->
+        <receiver
+            android:name=".receiver.ConfirmationReceiver"
+            android:exported="false" />
+
+        <receiver
+            android:name=".receiver.ConfirmationActionReceiver"
+            android:exported="false" />
+
     </application>
 
 </manifest>

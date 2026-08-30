@@ -27,4 +27,14 @@ enum class OccurrenceStatus {
 
     /** The occurrence was cancelled before it fired (e.g. alarm disabled, alarm deleted, edited). */
     CANCELLED,
+
+    /**
+     * Phase 1.1: the user explicitly chose SKIP for this one occurrence during the daily
+     * confirmation flow. Terminal state, exactly like DISMISSED/MISSED - never affects sibling
+     * occurrences or the parent [Alarm.isEnabled] flag. Excluded from
+     * [com.smartalarm.app.data.repository.AlarmRepository.getAllPendingOccurrences] (it is not
+     * SCHEDULED/SNOOZED), so boot recovery and rescheduling never resurrect it - see
+     * [com.smartalarm.app.domain.usecase.SkipOccurrenceUseCase].
+     */
+    SKIPPED,
 }

@@ -3,9 +3,11 @@ package com.smartalarm.app.fakes
 import com.smartalarm.app.data.repository.AlarmRepository
 import com.smartalarm.app.domain.model.Alarm
 import com.smartalarm.app.domain.model.AlarmOccurrence
+import com.smartalarm.app.domain.model.ConfirmationSettings
 import com.smartalarm.app.domain.model.OccurrenceStatus
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.map
 
 /** In-memory [AlarmRepository] for unit tests - no Room, no Android framework classes. */
 class FakeAlarmRepository : AlarmRepository {
@@ -16,6 +18,8 @@ class FakeAlarmRepository : AlarmRepository {
 
     private val alarmsFlow = MutableStateFlow<List<Alarm>>(emptyList())
     private val occurrencesFlow = MutableStateFlow<List<AlarmOccurrence>>(emptyList())
+
+    private val confirmationSettingsFlow = MutableStateFlow<ConfirmationSettings?>(null)
 
     override fun observeAlarms(): Flow<List<Alarm>> = alarmsFlow
     override fun observeOccurrences(): Flow<List<AlarmOccurrence>> = occurrencesFlow
@@ -56,4 +60,24 @@ class FakeAlarmRepository : AlarmRepository {
     }
 
     fun allOccurrences(): List<AlarmOccurrence> = occurrences.values.toList()
+
+    override suspend fun getScheduledOccurrencesBetween(startMillis: Long, endMillis: Long): List<AlarmOccurrence> =
+        occurrences.values.filter {
+            it.status == OccurrenceStatus.SCHEDULED && it.scheduledTimeMillis >= startMillis && it.scheduledTimeMillis < endMillis
+        }
+
+    override fun observeConfirmationSettings(): Flow<ConfirmationSettings> =
+        confirmationSettingsFlow.map { it ?: ConfirmationSettings() }
+
+    override suspend fun getConfirmationSettings(): ConfirmationSettings {
+        val existing = confirmationSettingsFlow.value
+        if (existing != null) return existing
+        val defaults = ConfirmationSettings()
+        confirmationSettingsFlow.value = defaults
+        return defaults
+    }
+
+    override suspend fun saveConfirmationSettings(settings: ConfirmationSettings) {
+        confirmationSettingsFlow.value = settings
+    }
 }

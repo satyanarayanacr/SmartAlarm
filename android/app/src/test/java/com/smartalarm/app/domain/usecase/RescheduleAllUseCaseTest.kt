@@ -6,6 +6,7 @@ import com.smartalarm.app.domain.model.OccurrenceStatus
 import com.smartalarm.app.domain.model.RepeatType
 import com.smartalarm.app.fakes.FakeAlarmRepository
 import com.smartalarm.app.fakes.FakeAlarmScheduler
+import com.smartalarm.app.fakes.FakeConfirmationScheduler
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -19,6 +20,8 @@ class RescheduleAllUseCaseTest {
 
     private lateinit var repository: FakeAlarmRepository
     private lateinit var scheduler: FakeAlarmScheduler
+    private lateinit var confirmationScheduler: FakeConfirmationScheduler
+    private lateinit var coordinator: AlarmSchedulingCoordinator
     private lateinit var createUseCase: CreateOrUpdateAlarmUseCase
     private lateinit var rescheduleUseCase: RescheduleAllUseCase
     private val zone = ZoneId.of("Asia/Kolkata")
@@ -28,9 +31,11 @@ class RescheduleAllUseCaseTest {
     fun setUp() {
         repository = FakeAlarmRepository()
         scheduler = FakeAlarmScheduler()
-        val coordinator = AlarmSchedulingCoordinator(repository, scheduler)
+        confirmationScheduler = FakeConfirmationScheduler()
+        coordinator = AlarmSchedulingCoordinator(repository, scheduler)
         createUseCase = CreateOrUpdateAlarmUseCase(repository, coordinator)
-        rescheduleUseCase = RescheduleAllUseCase(repository, coordinator)
+        val scheduleDailyConfirmationUseCase = ScheduleDailyConfirmationUseCase(repository, confirmationScheduler)
+        rescheduleUseCase = RescheduleAllUseCase(repository, coordinator, scheduleDailyConfirmationUseCase)
     }
 
     @Test
@@ -102,5 +107,32 @@ class RescheduleAllUseCaseTest {
     fun `boot recovery is a no-op when nothing was pending`() = runTest {
         rescheduleUseCase.execute(zone, now)
         assertEquals(0, scheduler.activeCount())
+    }
+
+    // Spec test 16.
+    @Test
+    fun `boot recovery does not restore a skipped occurrence`() = runTest {
+        val alarm = createUseCase.execute(
+            Alarm(name = "A", hour = 6, minute = 0, repeatType = RepeatType.WEEKLY, daysOfWeek = (1..7).toSet()),
+            zone,
+            now,
+        )
+        val occurrence = repository.allOccurrences().single()
+        val skipUseCase = SkipOccurrenceUseCase(repository, coordinator)
+        skipUseCase.execute(occurrence.id, zone, now) // already cancels this occurrence's AlarmManager entry
+
+        rescheduleUseCase.execute(zone, now)
+
+        assertEquals(OccurrenceStatus.SKIPPED, repository.getOccurrence(occurrence.id)!!.status) // untouched
+        assertFalse(scheduler.isCurrentlyScheduled(occurrence.id)) // never re-armed
+        assertTrue(repository.getAlarm(alarm.id)!!.isEnabled) // the rule itself is still fine
+    }
+
+    @Test
+    fun `boot recovery also restores the daily confirmation event`() = runTest {
+        rescheduleUseCase.execute(zone, now)
+
+        val expected = ZonedDateTime.of(2026, 9, 2, 21, 0, 0, 0, zone).toInstant().toEpochMilli()
+        assertEquals(expected, confirmationScheduler.scheduledAtMillis)
     }
 }
