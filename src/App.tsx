@@ -15,6 +15,7 @@ import {
   MapPin,
   Radio,
   Compass,
+  Download,
 } from 'lucide-react';
 import { AndroidFrame } from './components/AndroidFrame';
 import { AlarmListScreen } from './components/AlarmListScreen';
@@ -1133,6 +1134,17 @@ export default function App() {
               <BookOpen className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
               <span className="hidden sm:inline">Architecture Docs</span>
             </button>
+
+            <a
+              href="/smart-alarm-project.zip"
+              download="smart-alarm-project.zip"
+              id="download-code-zip-btn"
+              className="flex items-center gap-1.5 px-4 py-1.5 rounded-full text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-700 shadow-xs transition-all cursor-pointer"
+              title="Download entire code repository as ZIP archive"
+            >
+              <Download className="w-4 h-4" />
+              <span>Download ZIP</span>
+            </a>
           </div>
         </div>
       </header>

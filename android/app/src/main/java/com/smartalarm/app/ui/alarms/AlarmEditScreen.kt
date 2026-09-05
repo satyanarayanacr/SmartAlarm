@@ -65,7 +65,7 @@ fun AlarmEditScreen(
     var snoozeEnabled by remember { mutableStateOf(alarmToEdit?.isSnoozeEnabled ?: true) }
     var snoozeMinutes by remember { mutableStateOf((alarmToEdit?.snoozeDurationMinutes ?: 9).toFloat()) }
 
-    var isConfirmationEnabled by remember { mutableStateOf(alarmToEdit?.isConfirmationEnabled ?: false) }
+    var isConfirmationEnabled by remember { mutableStateOf(alarmToEdit?.isConfirmationEnabled ?: true) }
     var confirmationHour by remember { mutableStateOf(alarmToEdit?.confirmationHour ?: 21) }
     var confirmationMinute by remember { mutableStateOf(alarmToEdit?.confirmationMinute ?: 0) }
     var showConfirmationPicker by remember { mutableStateOf(false) }

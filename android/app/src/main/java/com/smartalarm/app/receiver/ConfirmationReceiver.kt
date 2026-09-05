@@ -32,7 +32,17 @@ class ConfirmationReceiver : BroadcastReceiver() {
 
         CoroutineScope(Dispatchers.Default).launch {
             try {
-                val confirmable = locator.getTomorrowsConfirmableOccurrencesUseCase.execute()
+                var confirmable = locator.getTomorrowsConfirmableOccurrencesUseCase.execute()
+                if (confirmable.isEmpty()) {
+                    val occurrenceId = intent.getLongExtra(EXTRA_OCCURRENCE_ID, 0L)
+                    if (occurrenceId != 0L) {
+                        val occ = locator.repository.getOccurrence(occurrenceId)
+                        val alm = if (occ != null) locator.repository.getAlarm(occ.alarmId) else null
+                        if (occ != null && alm != null && alm.isEnabled && alm.isConfirmationEnabled && occ.status == com.smartalarm.app.domain.model.OccurrenceStatus.SCHEDULED) {
+                            confirmable = listOf(com.smartalarm.app.domain.usecase.ConfirmableOccurrence(alm, occ))
+                        }
+                    }
+                }
                 if (confirmable.isNotEmpty()) {
                     NotificationHelper.showDailyConfirmation(context, confirmable)
                 }

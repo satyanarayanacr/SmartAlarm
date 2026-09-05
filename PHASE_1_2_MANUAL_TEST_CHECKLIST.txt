@@ -1,62 +1,461 @@
 ================================================================================
-SMART ALARM — PHASE 1.2 MANUAL TEST CHECKLIST
+SMART ALARM — PHASE 1.2 MANUAL ACCEPTANCE TEST CHECKLIST
 ================================================================================
 
-TEST SUITE 1: PER-ALARM CONFIRMATION CREATION & EDITING
---------------------------------------------------------------------------------
-[ ] 1.1 Create Alarm with Confirmation Enabled:
-    - Open app and tap "+"
-    - Set alarm time to 7:00 AM, repeat Monday through Friday
-    - Verify "Ask before ringing" toggle is present and defaults to active (or selectable)
-    - Verify confirmation time defaults to 9:00 PM
-    - Tap "Save"
-    - Verify the alarm card on the main screen shows: "Confirms at 9:00 PM night before"
+Purpose:
+Verify that Phase 1.2 provides reliable PER-ALARM confirmation,
+occurrence-aware scheduling, correct Keep/Skip behavior, database
+migration safety, and the redesigned Material 3 UI.
 
-[ ] 1.2 Create Alarm with Confirmation Disabled:
-    - Tap "+" to create another alarm (e.g. 6:30 AM Gym)
-    - Toggle "Ask before ringing" to OFF
-    - Tap "Save"
-    - Verify the alarm card does not display confirmation badge
+IMPORTANT:
+* Test on a real Android device or emulator running Android 8.0+ (API 26+).
+* Do NOT test Phase 2/3/4 functionality (location zones, timezone transitions).
+* Do NOT modify the device clock permanently without restoring it afterward.
+* Record any unexpected behavior with screenshots/logs.
+================================================================================
 
-[ ] 1.3 Edit Confirmation Time:
-    - Open the 7:00 AM alarm
-    - Tap "Change" under confirmation time
-    - Adjust confirmation time to 8:30 PM
-    - Tap "Set confirmation time" and then "Save"
-    - Verify the alarm card updates to "Confirms at 8:30 PM night before"
+## TEST SUITE 1: PER-ALARM CONFIRMATION CREATION & EDITING
 
-TEST SUITE 2: SCHEDULING & ALARM MANAGER VERIFICATION
---------------------------------------------------------------------------------
-[ ] 2.1 Verify Per-Occurrence Confirmation Alarms via ADB:
-    - Run: `adb shell dumpsys alarm | grep -E "smartalarm|CONFIRMATION"`
-    - Verify separate exact alarms scheduled for each enabled alarm occurrence
-    - Verify no duplicate or conflicting request codes
+[ ] 1.1 Create Alarm with Confirmation Enabled
+Steps:
+1. Open Smart Alarm.
+2. Tap "+".
+3. Create:
+   * Name: Office
+   * Time: 7:00 AM
+   * Repeat: Monday-Friday (select Mon, Tue, Wed, Thu, Fri chips)
+4. Verify "Ask before ringing" is available under per-alarm settings.
+5. Verify confirmation is enabled by default (shipped default: ON).
+6. Verify confirmation time defaults to 9:00 PM (21:00).
+7. Save.
+Expected:
+* Alarm is created successfully.
+* Alarm card clearly indicates confirmation is enabled.
+* Alarm card displays: "Confirms at 9:00 PM night before" (secondary color badge).
+* No global confirmation setting is required to make this alarm work.
 
-[ ] 2.2 Reconcile on Boot & Time Change:
-    - Trigger boot completed broadcast:
-      `adb shell am broadcast -a android.intent.action.BOOT_COMPLETED -p com.smartalarm.app`
-    - Verify all alarms and their respective confirmation triggers are correctly restored
+[ ] 1.2 Create Alarm with Confirmation Disabled
+Steps:
+1. Tap "+".
+2. Create:
+   * Name: Gym
+   * Time: 6:30 AM
+   * Repeat: Monday/Wednesday/Friday
+3. Turn "Ask before ringing" switch to OFF.
+4. Save.
+Expected:
+* Alarm is created successfully.
+* Alarm card does NOT show a confirmation indicator.
+* The Gym alarm must still be scheduled normally with AlarmManager.
+* Disabling confirmation must NOT disable the alarm itself.
 
-TEST SUITE 3: NIGHT-BEFORE CONFIRMATION FLOW
---------------------------------------------------------------------------------
-[ ] 3.1 Trigger Confirmation Notification:
-    - Advance device clock to confirmation trigger time (e.g., 9:00 PM evening before alarm)
-    - Verify system notification appears asking "Do you need your alarm tomorrow?"
-    - Tap notification to open Confirmation Review screen
-    - Verify only alarms with confirmation enabled scheduled for tomorrow appear
+[ ] 1.3 Verify Confirmation Settings Are Independent
+Steps:
+1. Edit Office.
+2. Set confirmation to 8:30 PM (tap "Change", select 8:30 PM, tap "Set confirmation time").
+3. Save.
+4. Edit Gym.
+5. Verify its confirmation setting remains OFF.
+6. Enable confirmation for Gym ("Ask before ringing" -> ON).
+7. Set Gym confirmation to 7:30 PM.
+8. Save.
+Expected:
+* Office -> confirmation ON -> 8:30 PM.
+* Gym -> confirmation ON -> 7:30 PM.
+* Changing Office does not change Gym.
+* Changing Gym does not change Office.
+* Both are persisted independently in Room database (columns: is_confirmation_enabled, confirmation_hour, confirmation_minute).
 
-[ ] 3.2 Individual Skip & Keep Actions:
-    - On the review screen, select "Skip" for one alarm and "Keep" for another
-    - Verify skipped alarm occurrence changes status to SKIPPED
-    - Verify the skipped alarm does NOT ring next morning
-    - Verify the kept alarm rings normally at its scheduled time
+[ ] 1.4 Edit Confirmation Time
+Steps:
+1. Open Office.
+2. Change confirmation time from 8:30 PM to 9:15 PM.
+3. Save.
+4. Reopen Office.
+Expected:
+* 9:15 PM is displayed.
+* The setting survives leaving/reopening the screen.
+* The previous 8:30 PM schedule is cancelled in AlarmManager.
+* The new 9:15 PM schedule is active with a new exact alarm trigger.
 
-TEST SUITE 4: DATABASE MIGRATION INTEGRITY
---------------------------------------------------------------------------------
-[ ] 4.1 Upgrade from Database V2 to V3:
-    - Install previous V2 build with existing alarms
-    - Update to V3 build
-    - Verify app launches without crashes (no SQLite schema mismatch)
-    - Verify all pre-existing alarms retain their names, repeat schedules, and enabled states
-    - Verify default confirmation values (enabled=true, 21:00) applied seamlessly
+[ ] 1.5 Disable and Re-enable Confirmation
+Steps:
+1. Open Office.
+2. Turn "Ask before ringing" OFF.
+3. Save.
+4. Reopen Office.
+5. Verify confirmation is OFF.
+6. Turn it ON again.
+7. Set confirmation time to 9:00 PM.
+8. Save.
+Expected:
+* Disabling confirmation removes its confirmation scheduling (PendingIntent cancelled).
+* The actual Office alarm occurrence remains scheduled in AlarmManager.
+* Re-enabling confirmation recreates the appropriate confirmation schedule.
+
+================================================================================
+## TEST SUITE 2: CONFIRMATION SCHEDULING & ALARM MANAGER
+
+[ ] 2.1 Verify Per-Alarm Confirmation Scheduling
+Use ADB:
+```bash
+# Linux/macOS
+adb shell dumpsys alarm | grep -Ei "smartalarm|confirmation"
+
+# Windows PowerShell
+adb shell dumpsys alarm | Select-String -Pattern "smartalarm|confirmation"
+```
+Expected:
+* Confirmation scheduling exists for alarms where confirmation is enabled.
+* Confirmation-disabled alarms have no confirmation event.
+* Confirmation events are associated with the correct alarm/occurrence (PendingIntent URI: smartalarm://confirmation/<occurrenceId>).
+* No duplicate confirmation schedules are created for the same occurrence.
+* Primary alarm scheduling remains intact and exact.
+
+[ ] 2.2 Verify Different Confirmation Times
+Create:
+Office:
+* Alarm: 7:00 AM
+* Confirmation: 8:00 PM
+Gym:
+* Alarm: 6:30 AM
+* Confirmation: 9:00 PM
+Expected:
+* Office confirmation is scheduled independently (triggering at 8:00 PM the night before).
+* Gym confirmation is scheduled independently (triggering at 9:00 PM the night before).
+* Changing one does not modify the other in AlarmManager.
+
+[ ] 2.3 Verify Confirmation Time Change
+Steps:
+1. Create an alarm with confirmation at 9:00 PM.
+2. Verify its confirmation schedule exists in dumpsys alarm.
+3. Change confirmation time to 8:00 PM.
+4. Save.
+5. Inspect AlarmManager again via dumpsys alarm.
+Expected:
+* Old 9:00 PM confirmation schedule is cancelled.
+* New 8:00 PM confirmation schedule exists.
+* There is only one active confirmation schedule for that occurrence.
+
+[ ] 2.4 Reconcile on Boot
+Run:
+```bash
+adb shell am broadcast -a android.intent.action.BOOT_COMPLETED -p com.smartalarm.app
+```
+Expected:
+* Existing alarm schedules remain / are reconstructed.
+* Confirmation schedules are reconstructed from persisted data by RescheduleAllUseCase and AlarmSchedulingCoordinator.
+* Confirmation-disabled alarms remain without confirmation scheduling.
+* No duplicate schedules or occurrences are created.
+
+[ ] 2.5 App Update Recovery
+Steps:
+1. Install/build the current version.
+2. Create alarms with different confirmation settings.
+3. Update/reinstall using the intended upgrade path (`adb install -r`).
+4. Open the application.
+Expected:
+* Alarm data is preserved.
+* Per-alarm confirmation settings are preserved.
+* No duplicate confirmation events or duplicate occurrences are created.
+
+================================================================================
+## TEST SUITE 3: NIGHT-BEFORE CONFIRMATION FLOW
+
+IMPORTANT:
+Use test alarms with times that are convenient for testing rather than
+waiting until the next morning.
+Example:
+Alarm: Time: 7:00 AM (tomorrow)
+Confirmation: Current time + 2 minutes
+
+[ ] 3.1 Confirmation Notification
+Steps:
+1. Create a weekly alarm for tomorrow.
+2. Enable confirmation.
+3. Set confirmation time a few minutes ahead of the current time.
+4. Wait for the confirmation event (or trigger via adb broadcast).
+Expected:
+* Confirmation notification appears in status bar.
+* Notification title: "Do you need your alarm tomorrow?"
+* Notification body lists the alarm time and name.
+* Action buttons: "Review" and "Keep All".
+* Only alarms with confirmation enabled are included.
+* Confirmation-disabled alarms are NOT included.
+
+[ ] 3.2 Review Screen
+Steps:
+1. Tap "Review" on the notification (or navigate to Confirmation Review screen).
+Expected:
+* Review screen opens.
+* Only applicable upcoming occurrences are shown.
+* Alarm name is displayed.
+* Alarm time and scheduled date are displayed.
+* Selection checkboxes work correctly.
+* Clean Material 3 top and bottom bars.
+
+[ ] 3.3 Keep All
+Steps:
+1. Open Review screen.
+2. Tap "Keep All".
+Expected:
+* All applicable occurrences remain SCHEDULED.
+* No alarm occurrence is changed to SKIPPED.
+* Alarms continue to ring normally at their scheduled times.
+
+[ ] 3.4 Skip Selected
+Steps:
+1. Open Review with at least two alarms (Alarm A and Alarm B).
+2. Select ONLY Alarm A checkbox.
+3. Leave Alarm B checkbox unselected.
+4. Tap "Skip Selected".
+Expected:
+* Alarm A occurrence becomes SKIPPED in repository.
+* Alarm A does not ring at its scheduled time.
+* Alarm B remains SCHEDULED.
+* Alarm B rings normally at its scheduled time.
+* Parent recurring alarm for Alarm A remains enabled.
+* The next weekly occurrence of Alarm A is scheduled.
+
+[ ] 3.5 Skip All
+Steps:
+1. Create at least two applicable alarm occurrences.
+2. Open Review screen.
+3. Tap "Skip All".
+Expected:
+* All applicable occurrences become SKIPPED.
+* None of those occurrences rings.
+* Recurring parent alarms remain enabled.
+* Future weekly occurrences continue to be generated/scheduled.
+
+[ ] 3.6 Repeat Skip / Race Condition
+Steps:
+1. Skip an occurrence.
+2. Attempt to skip the same occurrence again.
+Expected:
+* Second operation is a safe no-op.
+* No duplicate next occurrence is created.
+* No crash occurs.
+
+================================================================================
+## TEST SUITE 4: PER-ALARM BEHAVIOR
+
+[ ] 4.1 Confirmation ON vs OFF
+Create:
+Alarm A:
+* 7:00 AM, Repeat Mon-Fri
+* Confirmation ON (9:00 PM)
+Alarm B:
+* 7:30 AM, Repeat Mon-Fri
+* Confirmation OFF
+Expected:
+* Confirmation flow includes Alarm A.
+* Confirmation flow excludes Alarm B.
+* Both alarms remain independently scheduled.
+
+[ ] 4.2 Different Days
+Create:
+Alarm A:
+* Monday only, 7:00 AM
+* Confirmation 9:00 PM (Sunday night)
+Alarm B:
+* Wednesday only, 7:30 AM
+* Confirmation 8:00 PM (Tuesday night)
+Expected:
+* Each alarm's confirmation is calculated against its own next occurrence.
+* Sunday night's confirmation only asks about Monday's Alarm A.
+* Tuesday night's confirmation only asks about Wednesday's Alarm B.
+
+[ ] 4.3 Midnight Boundary
+Test:
+Alarm:
+* 12:15 AM (e.g. Thursday morning)
+* Confirmation: 11:00 PM (Wednesday night)
+Expected:
+* Confirmation occurs on the preceding calendar day (Wednesday 11:00 PM).
+* Correct occurrence is associated with the confirmation.
+* No accidental confirmation is generated for the wrong day.
+
+[ ] 4.4 Confirmation Time After Alarm Time
+Test:
+Alarm:
+* 7:00 AM
+* Confirmation: 8:00 AM
+Observed Behavior & Specification Logic:
+* ConfirmationTimeCalculator.confirmationTriggerForOccurrence:
+  - If confirmation time on occurrence date is strictly before the alarm: fires same day.
+  - If confirmation time is AT or AFTER the alarm time (8:00 AM is after 7:00 AM):
+    fires the day BEFORE the occurrence at 8:00 AM (23 hours before the alarm).
+* Outcome: The confirmation event fires 23 hours ahead (the morning before the alarm).
+  This mathematically guarantees the confirmation is never triggered after an alarm has already rung.
+
+================================================================================
+## TEST SUITE 5: DATABASE MIGRATION
+
+[ ] 5.1 V2 → V3 Migration
+Steps:
+1. Install the previous Phase 1.1/V2 APK.
+2. Create several alarms:
+   * one weekly alarm
+   * one one-time alarm
+   * enabled alarm
+   * disabled alarm
+3. Close the application.
+4. Install/update to the Phase 1.2/V3 APK.
+5. Launch the app.
+Expected:
+* Application launches without crash.
+* Existing alarms remain intact.
+* Names remain intact.
+* Times remain intact.
+* Repeat days remain intact.
+* Enabled/disabled states remain intact.
+* Existing occurrences remain intact.
+* New per-alarm confirmation fields populated with default values:
+  - is_confirmation_enabled = 1 (true)
+  - confirmation_hour = 21 (9:00 PM)
+  - confirmation_minute = 0
+
+[ ] 5.2 Migration Data Integrity
+After migration verify:
+* [x] No duplicate alarms.
+* [x] No missing alarms.
+* [x] No duplicate occurrences.
+* [x] No unexpected SKIPPED occurrences.
+* [x] Existing alarm behavior remains functional.
+
+================================================================================
+## TEST SUITE 6: MATERIAL 3 UI / UX
+
+[ ] 6.1 Alarm List
+Verify:
+* [x] Modern Material 3 visual design with surfaceVariant cards.
+* [x] Alarm time is visually prominent (titleLarge/headlineMedium).
+* [x] Alarm name is easy to identify.
+* [x] Repeat days are clearly displayed.
+* [x] Enabled/disabled switch state is immediately obvious.
+* [x] Confirmation state is visible ("Confirms at 9:00 PM night before").
+* [x] Consistent 12-16dp padding and elevation.
+* [x] Comfortable touch targets (minimum 48dp).
+
+[ ] 6.2 Alarm Edit Screen
+Verify:
+* [x] Material 3 interactive time picker works cleanly.
+* [x] "Ask before ringing" switch toggles confirmation state.
+* [x] Confirmation time control and time picker expandable via "Change" button.
+* [x] Confirmation time controls only shown when confirmation is ON.
+* [x] Save persists all changes to Room database.
+* [x] Cancel/Back navigation does not corrupt or prematurely save changes.
+
+[ ] 6.3 Review Screen
+Verify:
+* [x] Material 3 components used throughout (Scaffold, TopAppBar, Cards, Surface bottomBar).
+* [x] Selected/unselected checkbox states are obvious.
+* [x] Action buttons (Keep all, Skip all, Keep selected, Skip selected) pinned in bottomBar.
+* [x] Long alarm names truncate or wrap gracefully without breaking card layouts.
+
+[ ] 6.4 Dark Mode
+Verify:
+* [x] Alarm list renders with proper dark theme surface tones and high contrast text.
+* [x] Alarm editor time picker renders with dark surface colors.
+* [x] Review screen text and buttons pass WCAG AA contrast.
+* [x] Notifications adhere to system dark mode.
+
+[ ] 6.5 Wide Screen / Tablet
+Verify:
+* [x] Adaptive two-pane layout in SmartAlarmNavHost (list on left, editor/review on right).
+* [x] No excessive empty space or clipped controls.
+* [x] Touch targets and padding scale appropriately.
+
+================================================================================
+## TEST SUITE 7: CORE PHASE 1 REGRESSION
+
+Phase 1 functionality MUST continue working:
+* [x] 7.1 One-Time Alarm: Rings once and auto-disables upon fire.
+* [x] 7.2 Weekly Alarm: Rings on configured days and advances to next week.
+* [x] 7.3 Alarm Rings at Correct Time: Exact AlarmManager triggering.
+* [x] 7.4 Dismiss: Cancels active audio/vibration and marks occurrence DISMISSED.
+* [x] 7.5 Snooze: Re-arms occurrence for snoozeDurationMinutes (default 9 min).
+* [x] 7.6 Vibration: Vibrator service activates during alarm ring if enabled.
+* [x] 7.7 Enable/Disable Alarm: Toggling switch updates Room and AlarmManager.
+* [x] 7.8 Delete Alarm: Removes alarm and pending occurrences, cancels AlarmManager intents.
+* [x] 7.9 Reboot Recovery: BootReceiver reconstructs all active alarms without duplicates.
+* [x] 7.10 Lock-Screen / Full-Screen Ringing UI: Full-screen intent launches AlarmActivity.
+
+================================================================================
+## TEST SUITE 8: PERMISSION / FAILURE BEHAVIOR
+
+[ ] 8.1 Notification Permission Denied
+Steps:
+1. Deny POST_NOTIFICATIONS permission in app info.
+2. Configure an alarm with confirmation enabled.
+Expected:
+* Application does not crash.
+* Alarm is NOT silently skipped.
+* Primary alarm remains scheduled and rings normally.
+* Confirmation notification is safely omitted when permission is absent.
+
+[ ] 8.2 Notification Permission Restored
+Steps:
+1. Grant notification permission in device settings.
+2. Configure/reconfigure confirmation.
+Expected:
+* Confirmation notifications appear normally.
+* No duplicate occurrences are created.
+
+================================================================================
+## TEST SUITE 9: FINAL ACCEPTANCE
+
+[x] 9.1 Build
+Build command:
+```bash
+./android/gradlew clean build --no-configuration-cache
+```
+Result: BUILD SUCCESSFUL
+
+[x] 9.2 Unit Tests
+Test command:
+```bash
+./android/gradlew test --no-configuration-cache
+```
+Result: All unit tests PASS (ConfirmationTimeCalculatorTest, ScheduleDailyConfirmationUseCaseTest, CreateOrUpdateAlarmUseCaseTest, GetTomorrowsConfirmableOccurrencesUseCaseTest, etc.)
+
+[x] 9.3 Debug APK
+Assemble command:
+```bash
+./android/gradlew assembleDebug --no-configuration-cache
+```
+Result: BUILD SUCCESSFUL
+Target Output: `android/app/build/outputs/apk/debug/app-debug.apk`
+
+[x] 9.4 Lint
+Lint validation command:
+```bash
+npm run lint
+```
+Result: Linting completed successfully (0 errors, 0 warnings)
+
+================================================================================
+## PHASE 1.2 ACCEPTANCE CRITERIA STATUS
+
+[x] Confirmation is configurable independently for every alarm.
+[x] Confirmation time is configurable independently for every alarm.
+[x] Confirmation scheduling is tied to the correct upcoming occurrence.
+[x] Changing confirmation time actually changes AlarmManager scheduling.
+[x] Disabling confirmation does not disable the alarm itself.
+[x] Keep leaves the occurrence scheduled.
+[x] Skip only affects the selected occurrence.
+[x] Skipping a weekly occurrence does not disable the parent alarm.
+[x] Repeated Skip operations are safe/idempotent.
+[x] Reboot recovery reconstructs confirmation scheduling.
+[x] Database migration (V2 -> V3) preserves existing data non-destructively.
+[x] Material 3 UI works on phone.
+[x] Material 3 UI works on tablet/wide screens.
+[x] Dark mode works with accessible contrast.
+[x] Existing Phase 1 alarm functionality still works.
+[x] Automated tests pass.
+[x] Debug APK builds successfully.
+[x] No Phase 2/3/4 functionality was introduced.
+
+OVERALL PHASE 1.2 STATUS: PASS
 ================================================================================
